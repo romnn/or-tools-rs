@@ -15,6 +15,7 @@ jobs:
     name: lint ${{ matrix.package.name }} (${{ matrix.os }}, features ${{ matrix.package.features }})
     runs-on: ${{ matrix.os }}
     needs: [feature-matrix]
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -29,12 +30,13 @@ jobs:
       - name: Lint
         # prettier-ignore
         run: >-
-          task lint --
+          carg lint
           --package "${{ matrix.package.name }}"
           --features "${{ matrix.package.features }}"
 
   audit:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: arduino/setup-task@v2
@@ -48,6 +50,7 @@ jobs:
 
   outdated:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: arduino/setup-task@v2
@@ -61,6 +64,7 @@ jobs:
 
   unused-dependencies:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: arduino/setup-task@v2
@@ -76,6 +80,7 @@ jobs:
 
   spellcheck:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: arduino/setup-task@v2
