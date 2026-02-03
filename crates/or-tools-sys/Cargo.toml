@@ -1,0 +1,33 @@
+[package]
+name = "or-tools-sys"
+version.workspace = true
+edition.workspace = true
+description = "Low-level FFI and build/link glue for Google OR-Tools"
+links = "or_tools"
+
+[lints]
+workspace = true
+
+[dependencies]
+libc = "0"
+
+[build-dependencies]
+cc = "1"
+cmake = "0.1"
+
+[features]
+default = ["system"]
+system = []
+vendor-prebuilt = []
+build-from-source = []
+static = ["build-from-source"]
+
+# Optional OR-Tools components/solvers (build-from-source backend only).
+# Defaults are intentionally lean for CP-SAT-focused usage.
+math-opt = []
+flatzinc = []
+solver-coinor = []
+solver-highs = []
+solver-pdlp = []
+solver-scip = []
+solver-glpk = []

@@ -1,0 +1,408 @@
+use std::path::{Path, PathBuf};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("cargo:rerun-if-changed=src/cp_sat_wrapper.cpp");
+    println!("cargo:rerun-if-env-changed=ORTOOLS_PREFIX");
+    println!("cargo:rerun-if-env-changed=ORTOOL_PREFIX");
+    println!("cargo:rerun-if-env-changed=OR_TOOLS_SYS_SOURCE_DIR");
+    println!("cargo:rerun-if-env-changed=OR_TOOLS_SYS_PREBUILT_VERSION");
+    println!("cargo:rerun-if-env-changed=OR_TOOLS_SYS_PREBUILT_BUILD");
+    println!("cargo:rerun-if-env-changed=OR_TOOLS_SYS_BACKEND");
+
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS")?;
+
+    let (include_dir, lib_dir, emit_rpath, link_static) = resolve_ortools()?;
+
+    cc::Build::new()
+        .cpp(true)
+        .flags(["-std=c++17", "-DOR_PROTO_DLL="])
+        .file("src/cp_sat_wrapper.cpp")
+        .include(&include_dir)
+        .compile("or_tools_cp_sat_wrapper");
+
+    if target_os == "macos" {
+        println!("cargo:rustc-link-lib=dylib=c++");
+    } else if target_os == "linux" {
+        println!("cargo:rustc-link-lib=dylib=stdc++");
+        if link_static {
+            println!("cargo:rustc-link-arg=-static-libstdc++");
+            println!("cargo:rustc-link-arg=-static-libgcc");
+        }
+    }
+
+    let link_kind = if link_static { "static" } else { "dylib" };
+
+    println!("cargo:rustc-link-lib={link_kind}=ortools");
+    println!("cargo:rustc-link-lib={link_kind}=protobuf");
+    println!("cargo:rustc-link-lib={link_kind}=protobuf-lite");
+
+    if link_static {
+        emit_static_dep_links(&lib_dir)?;
+
+        // OR-Tools static builds typically still require system libs.
+        // We do not attempt full glibc-static linking.
+        println!("cargo:rustc-link-lib=dylib=pthread");
+        println!("cargo:rustc-link-lib=dylib=dl");
+        println!("cargo:rustc-link-lib=dylib=m");
+    }
+
+    println!("cargo:rustc-link-search=native={}", lib_dir.display());
+    if emit_rpath {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
+    }
+
+    println!(
+        "cargo:metadata=ortools_include_dir={}",
+        include_dir.display()
+    );
+    println!("cargo:metadata=ortools_lib_dir={}", lib_dir.display());
+    println!("cargo:metadata=ortools_link_static={link_static}");
+
+    Ok(())
+}
+
+fn emit_static_dep_links(lib_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    // Protobuf built by OR-Tools depends on Abseil (and other helper archives). When we
+    // link protobuf statically, we must also link these dependent archives.
+    //
+    // We discover them from the OR-Tools install prefix and emit them in a stable order.
+    let mut absl_libs = Vec::new();
+    for entry in std::fs::read_dir(lib_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let file_name = match path.file_name().and_then(|s| s.to_str()) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        if let Some(name) = file_name
+            .strip_prefix("libabsl_")
+            .and_then(|s| s.strip_suffix(".a"))
+        {
+            absl_libs.push(format!("absl_{name}"));
+        }
+    }
+    absl_libs.sort();
+
+    for lib in absl_libs {
+        println!("cargo:rustc-link-lib=static={lib}");
+    }
+
+    // Other dependency archives built/installed by OR-Tools that may be needed for
+    // fully-static OR-Tools+protobuf linking.
+    for lib in ["re2", "utf8_range", "utf8_validity", "upb", "z", "bz2"] {
+        let static_archive = lib_dir.join(format!("lib{lib}.a"));
+        if static_archive.is_file() {
+            println!("cargo:rustc-link-lib=static={lib}");
+            continue;
+        }
+
+        // Some deps (notably bz2) may only be available as shared objects even
+        // when OR-Tools itself is built as static. In that case we still need
+        // to link them dynamically to satisfy symbols.
+        if glob_exists(lib_dir, &format!("lib{lib}.so"))?
+            || glob_exists(lib_dir, &format!("lib{lib}.dylib"))?
+        {
+            println!("cargo:rustc-link-lib=dylib={lib}");
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum Backend {
+    System,
+    VendorPrebuilt,
+    BuildFromSource,
+}
+
+fn resolve_ortools() -> Result<(PathBuf, PathBuf, bool, bool), Box<dyn std::error::Error>> {
+    let feature_build_from_source = std::env::var("CARGO_FEATURE_BUILD_FROM_SOURCE").is_ok();
+    let feature_vendor_prebuilt = std::env::var("CARGO_FEATURE_VENDOR_PREBUILT").is_ok();
+    let feature_system = std::env::var("CARGO_FEATURE_SYSTEM").is_ok();
+    let feature_static = std::env::var("CARGO_FEATURE_STATIC").is_ok();
+
+    let backend = match std::env::var("OR_TOOLS_SYS_BACKEND").as_deref() {
+        Ok("system") => Backend::System,
+        Ok("vendor-prebuilt") => Backend::VendorPrebuilt,
+        Ok("build-from-source") => Backend::BuildFromSource,
+        Ok(other) => {
+            return Err(format!(
+                "invalid OR_TOOLS_SYS_BACKEND={other:?} (expected system|vendor-prebuilt|build-from-source)"
+            )
+            .into());
+        }
+        Err(_) => {
+            let mut selected = Vec::new();
+            if feature_system {
+                selected.push(Backend::System);
+            }
+            if feature_vendor_prebuilt {
+                selected.push(Backend::VendorPrebuilt);
+            }
+            if feature_build_from_source {
+                selected.push(Backend::BuildFromSource);
+            }
+
+            match selected.as_slice() {
+                [only] => *only,
+                _ => Backend::System,
+            }
+        }
+    };
+
+    let link_static = feature_static && backend == Backend::BuildFromSource;
+
+    let prefix = match backend {
+        Backend::BuildFromSource => build_ortools_from_source(link_static)?,
+        Backend::VendorPrebuilt => download_ortools_prebuilt()?,
+        Backend::System => std::env::var("ORTOOLS_PREFIX")
+            .or_else(|_| std::env::var("ORTOOL_PREFIX"))
+            .unwrap_or_else(|_| "/opt/ortools".into()),
+    };
+
+    let include_dir = PathBuf::from(&prefix).join("include");
+    let lib_dir = ortools_lib_dir(&prefix);
+
+    let emit_rpath = !link_static;
+    Ok((include_dir, lib_dir, emit_rpath, link_static))
+}
+
+fn ortools_lib_dir(prefix: &str) -> PathBuf {
+    let lib = PathBuf::from(format!("{prefix}/lib"));
+    if lib.is_dir() {
+        lib
+    } else {
+        PathBuf::from(format!("{prefix}/lib64"))
+    }
+}
+
+fn workspace_root() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
+    Ok(manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .ok_or("failed to locate workspace root")?
+        .to_path_buf())
+}
+
+fn build_ortools_from_source(link_static: bool) -> Result<String, Box<dyn std::error::Error>> {
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR")?);
+
+    let source_dir = match std::env::var("OR_TOOLS_SYS_SOURCE_DIR") {
+        Ok(p) => PathBuf::from(p),
+        Err(_) => workspace_root()?.join("vendor/or-tools"),
+    };
+
+    let source_dir = source_dir.canonicalize()?;
+
+    let install_dir = out_dir.join("or_tools_install");
+
+    let mut cfg = cmake::Config::new(&source_dir);
+    // Building OR-Tools in Debug mode is extremely slow and produces huge artifacts.
+    // This is an internal dependency, so a Release build is acceptable.
+    cfg.profile("Release");
+    cfg.define("BUILD_CXX", "ON");
+    cfg.define("BUILD_PYTHON", "OFF");
+    cfg.define("BUILD_JAVA", "OFF");
+    cfg.define("BUILD_DOTNET", "OFF");
+    cfg.define("BUILD_DOC", "OFF");
+    cfg.define("BUILD_TESTING", "OFF");
+    cfg.define("BUILD_CXX_SAMPLES", "OFF");
+    cfg.define("BUILD_CXX_EXAMPLES", "OFF");
+    cfg.define("BUILD_CXX_DOC", "OFF");
+
+    cfg.define("BUILD_SAMPLES", "OFF");
+    cfg.define("BUILD_EXAMPLES", "OFF");
+
+    // Keep the build self-contained: build all dependencies from source.
+    // This is important for static builds and also avoids relying on system protobuf.
+    cfg.define("BUILD_DEPS", "ON");
+
+    // Lean defaults: disable optional components unless explicitly enabled.
+    let enable_math_opt = std::env::var("CARGO_FEATURE_MATH_OPT").is_ok();
+    let enable_flatzinc = std::env::var("CARGO_FEATURE_FLATZINC").is_ok();
+    cfg.define("BUILD_MATH_OPT", if enable_math_opt { "ON" } else { "OFF" });
+    cfg.define("BUILD_FLATZINC", if enable_flatzinc { "ON" } else { "OFF" });
+
+    // Optional third-party solvers: default OFF for CP-SAT-focused usage.
+    // Note: Some solvers are "OFF not supported" upstream (e.g. GLOP/BOP), so we
+    // avoid trying to disable those here.
+    let use_coinor = std::env::var("CARGO_FEATURE_SOLVER_COINOR").is_ok();
+    let use_highs = std::env::var("CARGO_FEATURE_SOLVER_HIGHS").is_ok();
+    let use_pdlp = std::env::var("CARGO_FEATURE_SOLVER_PDLP").is_ok();
+    let use_scip = std::env::var("CARGO_FEATURE_SOLVER_SCIP").is_ok();
+    let use_glpk = std::env::var("CARGO_FEATURE_SOLVER_GLPK").is_ok();
+
+    cfg.define("USE_COINOR", if use_coinor { "ON" } else { "OFF" });
+    cfg.define("USE_HIGHS", if use_highs { "ON" } else { "OFF" });
+    cfg.define("USE_PDLP", if use_pdlp { "ON" } else { "OFF" });
+    cfg.define("USE_SCIP", if use_scip { "ON" } else { "OFF" });
+    cfg.define("USE_GLPK", if use_glpk { "ON" } else { "OFF" });
+    cfg.define("USE_CPLEX", "OFF");
+    // These are ON-by-default upstream (and "OFF not supported" in some configs),
+    // but they currently depend on MathOpt targets.
+    cfg.define("USE_GUROBI", "OFF");
+    cfg.define("USE_XPRESS", "OFF");
+
+    if link_static {
+        cfg.define("BUILD_SHARED_LIBS", "OFF");
+    } else {
+        cfg.define("BUILD_SHARED_LIBS", "ON");
+    }
+
+    // OR-Tools defaults to C++17 on non-MSVC; keep this aligned for compatibility.
+    cfg.define("CMAKE_CXX_STANDARD", "17");
+    cfg.define("CMAKE_POSITION_INDEPENDENT_CODE", "ON");
+    cfg.define("CMAKE_INSTALL_PREFIX", &install_dir);
+
+    let _dst = cfg.build();
+
+    Ok(install_dir.to_string_lossy().to_string())
+}
+
+fn download_ortools_prebuilt() -> Result<String, Box<dyn std::error::Error>> {
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR")?);
+
+    let ortools_version =
+        std::env::var("OR_TOOLS_SYS_PREBUILT_VERSION").unwrap_or_else(|_| "9.15".into());
+    let ortools_build =
+        std::env::var("OR_TOOLS_SYS_PREBUILT_BUILD").unwrap_or_else(|_| "6755".into());
+
+    let target = std::env::var("TARGET")?;
+    let os = std::env::var("CARGO_CFG_TARGET_OS")?;
+    let arch = std::env::var("CARGO_CFG_TARGET_ARCH")?;
+
+    let asset = match (os.as_str(), arch.as_str()) {
+        ("linux", "x86_64") => {
+            format!("or-tools_amd64_ubuntu-24.04_cpp_v{ortools_version}.{ortools_build}.tar.gz")
+        }
+        ("macos", "aarch64") => {
+            format!("or-tools_arm64_macOS-26.2_cpp_v{ortools_version}.{ortools_build}.tar.gz")
+        }
+        _ => {
+            return Err(
+                format!("or-tools-sys vendor-prebuilt does not support target {target}").into(),
+            );
+        }
+    };
+
+    let url =
+        format!("https://github.com/google/or-tools/releases/download/v{ortools_version}/{asset}");
+
+    let download_dir = out_dir.join("or_tools_vendor_prebuilt");
+    let tarball = download_dir.join(&asset);
+    let extract_dir = download_dir.join("_extract");
+    let prefix_marker = download_dir.join("PREFIX_DIR");
+
+    std::fs::create_dir_all(&download_dir)?;
+
+    if let Ok(prefix) = std::fs::read_to_string(&prefix_marker) {
+        let prefix = prefix.trim();
+        if !prefix.is_empty() && Path::new(prefix).is_dir() {
+            return Ok(prefix.to_string());
+        }
+    }
+
+    if !tarball.is_file() {
+        download(&url, &tarball)?;
+    }
+
+    if extract_dir.exists() {
+        std::fs::remove_dir_all(&extract_dir)?;
+    }
+    std::fs::create_dir_all(&extract_dir)?;
+    extract_tgz(&tarball, &extract_dir)?;
+
+    let prefix = find_first_dir(&extract_dir)?;
+
+    let include = prefix.join("include/ortools/sat/cp_model.h");
+    if !include.is_file() {
+        return Err("vendored OR-Tools extraction missing include/ortools/sat/cp_model.h".into());
+    }
+
+    let lib_dir = if prefix.join("lib").is_dir() {
+        prefix.join("lib")
+    } else {
+        prefix.join("lib64")
+    };
+
+    if os == "linux" {
+        if !glob_exists(&lib_dir, "libortools.so")? && !glob_exists(&lib_dir, "libortools.a")? {
+            return Err("vendored OR-Tools extraction missing libortools".into());
+        }
+    } else if !glob_exists(&lib_dir, "libortools.dylib")? && !glob_exists(&lib_dir, "libortools.a")?
+    {
+        return Err("vendored OR-Tools extraction missing libortools".into());
+    }
+
+    let prefix_str = prefix.to_string_lossy().to_string();
+    std::fs::write(prefix_marker, &prefix_str)?;
+    Ok(prefix_str)
+}
+
+fn download(url: &str, out: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let status = std::process::Command::new("curl")
+        .args(["-L", "--fail", "-o"])
+        .arg(out)
+        .arg(url)
+        .status();
+
+    match status {
+        Ok(s) if s.success() => return Ok(()),
+        _ => {}
+    }
+
+    let status = std::process::Command::new("wget")
+        .args(["-O"])
+        .arg(out)
+        .arg(url)
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("failed to download {url}").into());
+    }
+
+    Ok(())
+}
+
+fn extract_tgz(tarball: &Path, extract_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let status = std::process::Command::new("tar")
+        .args(["-xzf"])
+        .arg(tarball)
+        .args(["-C"])
+        .arg(extract_dir)
+        .status()?;
+    if !status.success() {
+        return Err("failed to extract OR-Tools tarball".into());
+    }
+    Ok(())
+}
+
+fn find_first_dir(dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            return Ok(path);
+        }
+    }
+    Err("failed to locate extracted OR-Tools directory".into())
+}
+
+fn glob_exists(dir: &Path, prefix: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(prefix) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}

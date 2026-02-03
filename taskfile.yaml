@@ -1,0 +1,123 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: "3"
+tasks:
+  test:
+    desc: "run unit tests in cargo workspace"
+    aliases: ["test:unit"]
+    cmds:
+      # prettier-ignore
+      - >-
+        cargo nextest run
+        --workspace
+        --all-targets
+        --no-tests "warn"
+        {{.CLI_ARGS}}
+
+  test:fc:
+    desc: "run unit tests in cargo workspace for all combinations of features"
+    aliases: ["test:unit:fc"]
+    cmds:
+      # prettier-ignore
+      - >-
+        cargo fc nextest run
+        --workspace
+        --all-targets
+        --no-tests "warn"
+        {{.CLI_ARGS}}
+
+  build:
+    desc: "build cargo workspace"
+    cmds:
+      - cargo build --workspace --all-targets {{.CLI_ARGS}}
+
+  clean:
+    desc: "clean cargo build files older than 7 days"
+    cmds:
+      - cargo sweep --time 7
+
+  clean:full:
+    desc: "clean all cargo build files"
+    cmds:
+      - cargo clean {{.CLI_ARGS}}
+
+  format:
+    desc: "format cargo workspace"
+    aliases: [fmt]
+    cmds:
+      - cargo fmt --all {{.CLI_ARGS}}
+
+  format:check:
+    desc: "check rust formatting"
+    cmds:
+      - cargo fmt --all --check {{.CLI_ARGS}}
+
+  docs:
+    desc: "open documentation preview"
+    env:
+      RUSTDOCFLAGS: "--cfg docsrs"
+    cmds:
+      - cargo +nightly doc --all-features {{.CLI_ARGS}}
+      # - cargo +nightly watchdoc --all-features {{.CLI_ARGS}}
+
+  update:
+    desc: "update dependencies in cargo workspace"
+    cmds:
+      - cargo update {{.CLI_ARGS}}
+
+  outdated:
+    desc: "check for outdated cargo workspace dependencies"
+    cmds:
+      - cargo outdated --workspace --ignore-external-rel --exit-code 1 -v {{.CLI_ARGS}}
+
+  unused:
+    desc: "check for unused cargo workspace dependencies"
+    aliases: [unused-dependencies]
+    cmds:
+      - cargo +nightly udeps {{.CLI_ARGS}}
+
+  audit:
+    desc: "audit cargo workspace dependencies"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - cargo audit {{.CLI_ARGS}}
+
+  check:
+    desc: "check cargo workspace"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - cargo check --workspace --all-targets {{.CLI_ARGS}}
+
+  check:fc:
+    desc: "check cargo workspace"
+    dir: "{{.ROOT_DIR}}"
+    cmds:
+      - cargo fc check --workspace --all-targets {{.CLI_ARGS}}
+
+  lint:
+    desc: "lint cargo workspace"
+    cmds:
+      # prettier-ignore
+      - >-
+        cargo clippy
+        --all-targets --all-features
+        -- -Dclippy::all -Dclippy::pedantic {{.CLI_ARGS}}
+
+  lint:fc:
+    desc: "lint cargo workspace for feature combinations"
+    cmds:
+      # prettier-ignore
+      - >-
+        cargo fc clippy
+        --all-targets
+        -- -Dclippy::all -Dclippy::pedantic {{.CLI_ARGS}}
+
+  lint:fix:
+    desc: "lint and fix cargo workspace"
+    aliases: [fix]
+    cmds:
+      # prettier-ignore
+      - >-
+        cargo clippy
+        --fix --allow-dirty --allow-staged
+        --all-targets --all-features
+        -- -Dclippy::all -Dclippy::pedantic {{.CLI_ARGS}}

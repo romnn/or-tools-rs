@@ -1,0 +1,37 @@
+[package]
+name = "or-tools"
+version.workspace = true
+edition.workspace = true
+description = "Safe Rust API for Google OR-Tools (CP-SAT focus)."
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+or-tools-sys = { path = "../or-tools-sys" }
+prost = "0.14"
+bytes = "1"
+libc = "0"
+smallvec = { version = "1", default-features = false, features = ["union"]}
+
+[build-dependencies]
+prost-build = { version = "0.14" }
+or-tools-sys = { path = "../or-tools-sys" }
+
+[features]
+default = ["system"]
+system = ["or-tools-sys/system"]
+vendor-prebuilt = ["or-tools-sys/vendor-prebuilt"]
+build-from-source = ["or-tools-sys/build-from-source"]
+static = ["or-tools-sys/static"]
+
+math-opt = ["or-tools-sys/math-opt"]
+flatzinc = ["or-tools-sys/flatzinc"]
+solver-coinor = ["or-tools-sys/solver-coinor"]
+solver-highs = ["or-tools-sys/solver-highs"]
+solver-pdlp = ["or-tools-sys/solver-pdlp"]
+solver-scip = ["or-tools-sys/solver-scip"]
+solver-glpk = ["or-tools-sys/solver-glpk"]
