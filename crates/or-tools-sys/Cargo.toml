@@ -16,7 +16,7 @@ cc = "1"
 cmake = "0.1"
 
 [features]
-default = ["system"]
+default = ["vendor-prebuilt"]
 system = []
 vendor-prebuilt = []
 build-from-source = []

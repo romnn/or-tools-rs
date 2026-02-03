@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 
+const ORTOOLS_VERSION: &str = "9.15";
+const ORTOOLS_PREBUILT_BUILD: &str = "6755";
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/cp_sat_wrapper.cpp");
     println!("cargo:rerun-if-env-changed=ORTOOLS_PREFIX");
@@ -15,6 +18,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     cc::Build::new()
         .cpp(true)
+        .warnings(false)
+        .extra_warnings(false)
         .flags(["-std=c++17", "-DOR_PROTO_DLL="])
         .file("src/cp_sat_wrapper.cpp")
         .include(&include_dir)
@@ -194,12 +199,7 @@ fn workspace_root() -> Result<PathBuf, Box<dyn std::error::Error>> {
 fn build_ortools_from_source(link_static: bool) -> Result<String, Box<dyn std::error::Error>> {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR")?);
 
-    let source_dir = match std::env::var("OR_TOOLS_SYS_SOURCE_DIR") {
-        Ok(p) => PathBuf::from(p),
-        Err(_) => workspace_root()?.join("vendor/or-tools"),
-    };
-
-    let source_dir = source_dir.canonicalize()?;
+    let source_dir = prepare_ortools_source_dir()?;
 
     let install_dir = out_dir.join("or_tools_install");
 
@@ -269,10 +269,14 @@ fn build_ortools_from_source(link_static: bool) -> Result<String, Box<dyn std::e
 fn download_ortools_prebuilt() -> Result<String, Box<dyn std::error::Error>> {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR")?);
 
-    let ortools_version =
-        std::env::var("OR_TOOLS_SYS_PREBUILT_VERSION").unwrap_or_else(|_| "9.15".into());
-    let ortools_build =
-        std::env::var("OR_TOOLS_SYS_PREBUILT_BUILD").unwrap_or_else(|_| "6755".into());
+    let ortools_version = std::env::var("OR_TOOLS_SYS_PREBUILT_VERSION")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| ORTOOLS_VERSION.to_string());
+    let ortools_build = std::env::var("OR_TOOLS_SYS_PREBUILT_BUILD")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| ORTOOLS_PREBUILT_BUILD.to_string());
 
     let target = std::env::var("TARGET")?;
     let os = std::env::var("CARGO_CFG_TARGET_OS")?;
@@ -393,6 +397,81 @@ fn find_first_dir(dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
         }
     }
     Err("failed to locate extracted OR-Tools directory".into())
+}
+
+fn prepare_ortools_source_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    match std::env::var("OR_TOOLS_SYS_SOURCE_DIR") {
+        Ok(p) => Ok(PathBuf::from(p).canonicalize()?),
+        Err(_) => {
+            let source_dir = workspace_root()?.join("vendor/or-tools");
+            ensure_ortools_source_present(&source_dir)?;
+            Ok(source_dir.canonicalize()?)
+        }
+    }
+}
+
+fn ensure_ortools_source_present(source_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let marker = source_dir.join(".or-tools-sys-version");
+
+    let expected_header = source_dir.join("ortools/sat/cp_model.h");
+    let expected_version = ORTOOLS_VERSION;
+
+    if source_dir.is_dir() {
+        let marker_version = std::fs::read_to_string(&marker)
+            .ok()
+            .map(|s| s.trim().to_string());
+
+        let version_matches = marker_version
+            .as_deref()
+            .is_some_and(|v| v == expected_version);
+
+        if expected_header.is_file() && version_matches {
+            return Ok(());
+        }
+
+        std::fs::remove_dir_all(source_dir)?;
+    }
+
+    let vendor_dir = source_dir
+        .parent()
+        .ok_or("failed to locate vendor directory")?
+        .to_path_buf();
+    std::fs::create_dir_all(&vendor_dir)?;
+
+    let url =
+        format!("https://github.com/google/or-tools/archive/refs/tags/v{expected_version}.tar.gz");
+    let asset = format!("or-tools-src-v{expected_version}.tar.gz");
+
+    let download_dir = vendor_dir.join("or_tools_source");
+    let tarball = download_dir.join(&asset);
+    let extract_dir = download_dir.join("_extract");
+
+    std::fs::create_dir_all(&download_dir)?;
+
+    if !tarball.is_file() {
+        download(&url, &tarball)?;
+    }
+
+    if extract_dir.exists() {
+        std::fs::remove_dir_all(&extract_dir)?;
+    }
+    std::fs::create_dir_all(&extract_dir)?;
+    extract_tgz(&tarball, &extract_dir)?;
+
+    let extracted_root = find_first_dir(&extract_dir)?;
+
+    if source_dir.exists() {
+        std::fs::remove_dir_all(source_dir)?;
+    }
+
+    std::fs::rename(&extracted_root, source_dir)?;
+
+    if !expected_header.is_file() {
+        return Err("downloaded OR-Tools source missing ortools/sat/cp_model.h".into());
+    }
+
+    std::fs::write(marker, expected_version)?;
+    Ok(())
 }
 
 fn glob_exists(dir: &Path, prefix: &str) -> Result<bool, Box<dyn std::error::Error>> {

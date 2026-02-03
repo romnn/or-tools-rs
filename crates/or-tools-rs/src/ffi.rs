@@ -3,7 +3,7 @@ use libc::c_char;
 use prost::Message;
 use std::ffi::CStr;
 
-extern "C" {
+unsafe extern "C" {
     fn cp_sat_wrapper_solve(
         model_buf: *const u8,
         model_size: usize,

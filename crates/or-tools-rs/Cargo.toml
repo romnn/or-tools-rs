@@ -22,7 +22,7 @@ prost-build = { version = "0.14" }
 or-tools-sys = { path = "../or-tools-sys" }
 
 [features]
-default = ["system"]
+default = ["vendor-prebuilt"]
 system = ["or-tools-sys/system"]
 vendor-prebuilt = ["or-tools-sys/vendor-prebuilt"]
 build-from-source = ["or-tools-sys/build-from-source"]
