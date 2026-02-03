@@ -430,7 +430,9 @@ fn find_first_dir(dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
 }
 
 fn prepare_ortools_source_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if let Ok(p) = std::env::var("OR_TOOLS_SYS_SOURCE_DIR") { Ok(normalize_windows_path(PathBuf::from(p).canonicalize()?)) } else {
+    if let Ok(p) = std::env::var("OR_TOOLS_SYS_SOURCE_DIR") {
+        Ok(normalize_windows_path(PathBuf::from(p).canonicalize()?))
+    } else {
         let source_dir = if let Some(cache_dir) = ortools_sys_cache_dir() {
             cache_dir.join("or_tools_source_dir")
         } else if cfg!(windows) {

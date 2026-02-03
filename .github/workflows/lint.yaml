@@ -16,7 +16,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      OR_TOOLS_SYS_CACHE_DIR: ${{ runner.temp }}/or-tools-sys-cache
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_BASEDIR: ${{ github.workspace }}
       RUSTC_WRAPPER: sccache
@@ -31,6 +30,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+
+      - name: Set CI cache dirs
+        shell: bash
+        run: |-
+          echo "OR_TOOLS_SYS_CACHE_DIR=${RUNNER_TEMP}/or-tools-sys-cache" >> "$GITHUB_ENV"
 
       - uses: mozilla-actions/sccache-action@v0.0.5
 

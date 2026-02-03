@@ -35,7 +35,6 @@ jobs:
     env:
       OR_TOOLS_SYS_PREBUILT_VERSION: "9.15"
       OR_TOOLS_SYS_PREBUILT_BUILD: "6755"
-      OR_TOOLS_SYS_CACHE_DIR: ${{ runner.temp }}/or-tools-sys-cache
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_BASEDIR: ${{ github.workspace }}
       RUSTC_WRAPPER: sccache
@@ -50,6 +49,20 @@ jobs:
         with:
           components: clippy
 
+      - name: Set CI cache dirs
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |-
+          echo "OR_TOOLS_SYS_CACHE_DIR=${RUNNER_TEMP}/or-tools-sys-cache" >> "$GITHUB_ENV"
+          echo "OR_TOOLS_SYS_PREBUILT_CACHE_DIR=${RUNNER_TEMP}/or-tools-prebuilt" >> "$GITHUB_ENV"
+
+      - name: Set CI cache dirs (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |-
+          "OR_TOOLS_SYS_CACHE_DIR=$env:RUNNER_TEMP/or-tools-sys-cache" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "OR_TOOLS_SYS_PREBUILT_CACHE_DIR=$env:RUNNER_TEMP/or-tools-prebuilt" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - uses: mozilla-actions/sccache-action@v0.0.5
 
       - uses: Swatinem/rust-cache@v2
@@ -61,7 +74,7 @@ jobs:
         with:
           path: |-
             ${{ env.OR_TOOLS_SYS_CACHE_DIR }}
-            ${{ runner.temp }}/or-tools-prebuilt
+            ${{ env.OR_TOOLS_SYS_PREBUILT_CACHE_DIR }}
           key: v1-ortools-${{ runner.os }}-${{ hashFiles('crates/or-tools-sys/build.rs') }}
           restore-keys: |-
             v1-ortools-${{ runner.os }}-
@@ -155,7 +168,7 @@ jobs:
         run: |-
           VERSION="${OR_TOOLS_SYS_PREBUILT_VERSION}"
           BUILD="${OR_TOOLS_SYS_PREBUILT_BUILD}"
-          PREFIX_BASE="${RUNNER_TEMP}/or-tools-prebuilt/v${VERSION}.${BUILD}"
+          PREFIX_BASE="${OR_TOOLS_SYS_PREBUILT_CACHE_DIR}/v${VERSION}.${BUILD}"
           mkdir -p "${PREFIX_BASE}"
           if [ "${RUNNER_OS}" = "Linux" ]; then
             ASSET="or-tools_amd64_ubuntu-24.04_cpp_v${VERSION}.${BUILD}.tar.gz"
