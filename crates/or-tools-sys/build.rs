@@ -93,9 +93,8 @@ fn emit_static_dep_links(lib_dir: &Path) -> Result<(), Box<dyn std::error::Error
             continue;
         }
 
-        let file_name = match path.file_name().and_then(|s| s.to_str()) {
-            Some(s) => s,
-            None => continue,
+        let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
         };
 
         if let Some(name) = file_name
@@ -415,14 +414,37 @@ fn find_first_dir(dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
 }
 
 fn prepare_ortools_source_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    match std::env::var("OR_TOOLS_SYS_SOURCE_DIR") {
-        Ok(p) => Ok(PathBuf::from(p).canonicalize()?),
-        Err(_) => {
-            let source_dir = workspace_root()?.join("vendor/or-tools");
-            ensure_ortools_source_present(&source_dir)?;
+    if let Ok(p) = std::env::var("OR_TOOLS_SYS_SOURCE_DIR") { Ok(normalize_windows_path(PathBuf::from(p).canonicalize()?)) } else {
+        let source_dir = if cfg!(windows) {
+            if let Ok(tmp) = std::env::var("RUNNER_TEMP") {
+                PathBuf::from(tmp).join("or_tools_source_dir")
+            } else {
+                std::env::temp_dir().join("or_tools_source_dir")
+            }
+        } else {
+            workspace_root()?.join("vendor/or-tools")
+        };
+        ensure_ortools_source_present(&source_dir)?;
+        if cfg!(windows) {
+            Ok(normalize_windows_path(source_dir.canonicalize()?))
+        } else {
             Ok(source_dir.canonicalize()?)
         }
     }
+}
+
+fn normalize_windows_path(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = path.to_string_lossy();
+        if let Some(stripped) = s.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{stripped}"));
+        }
+        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped);
+        }
+    }
+    path
 }
 
 fn ensure_ortools_source_present(source_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -447,10 +469,21 @@ fn ensure_ortools_source_present(source_dir: &Path) -> Result<(), Box<dyn std::e
         std::fs::remove_dir_all(source_dir)?;
     }
 
-    let vendor_dir = source_dir
-        .parent()
-        .ok_or("failed to locate vendor directory")?
-        .to_path_buf();
+    let vendor_dir = if cfg!(windows) {
+        if let Ok(tmp) = std::env::var("RUNNER_TEMP") {
+            PathBuf::from(tmp).join("or-tools-sys")
+        } else {
+            source_dir
+                .parent()
+                .ok_or("failed to locate vendor directory")?
+                .to_path_buf()
+        }
+    } else {
+        source_dir
+            .parent()
+            .ok_or("failed to locate vendor directory")?
+            .to_path_buf()
+    };
     std::fs::create_dir_all(&vendor_dir)?;
 
     let url =

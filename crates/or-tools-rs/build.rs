@@ -13,12 +13,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let (Ok(lib_dir), Ok(link_static)) = (
             std::env::var("DEP_OR_TOOLS_ORTOOLS_LIB_DIR"),
             std::env::var("DEP_OR_TOOLS_ORTOOLS_LINK_STATIC"),
-        ) {
-            if !lib_dir.is_empty() && link_static != "true" {
+        )
+            && !lib_dir.is_empty() && link_static != "true" {
                 println!("cargo:rustc-link-arg=-Wl,-rpath,{lib_dir}");
                 return Ok(());
             }
-        }
 
         if let Ok(prefix) =
             std::env::var("ORTOOLS_PREFIX").or_else(|_| std::env::var("ORTOOL_PREFIX"))

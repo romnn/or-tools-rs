@@ -40,20 +40,14 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - uses: Homebrew/actions/setup-homebrew@master
-        if: runner.os != 'Windows'
-      - run: brew install protobuf
-        if: runner.os != 'Windows'
+        if: runner.os == 'macOS'
 
-      - name: Force build-from-source on Windows
-        if: runner.os == 'Windows' && !contains(matrix.package.features, 'system')
-        shell: bash
-        run: |-
-          echo "OR_TOOLS_SYS_BACKEND=build-from-source" >> "$GITHUB_ENV"
-
-      - name: Install build dependencies (build-from-source)
-        if: runner.os == 'Linux' && (contains(matrix.package.features, 'build-from-source') || contains(matrix.package.features, 'static'))
+      - name: Install native dependencies (Linux)
+        if: runner.os == 'Linux'
         shell: bash
         run: |-
           sudo apt-get update
@@ -62,21 +56,27 @@ jobs:
             cmake \
             ninja-build \
             pkg-config \
+            protobuf-compiler \
             curl \
             tar
 
-      - name: Install build dependencies (build-from-source)
-        if: runner.os == 'macOS' && (contains(matrix.package.features, 'build-from-source') || contains(matrix.package.features, 'static'))
+      - name: Install native dependencies (macOS)
+        if: runner.os == 'macOS'
         shell: bash
         run: |-
-          brew update
-          brew install cmake ninja
+          brew install protobuf cmake ninja
 
-      - name: Install build dependencies (build-from-source)
-        if: runner.os == 'Windows' && !contains(matrix.package.features, 'system')
+      - name: Install native dependencies (Windows)
+        if: runner.os == 'Windows'
         shell: bash
         run: |-
-          choco install -y cmake ninja
+          choco install -y cmake ninja protobuf
+
+      - name: Force build-from-source on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |-
+          echo "OR_TOOLS_SYS_BACKEND=build-from-source" >> "$GITHUB_ENV"
 
       - name: Install system OR-Tools + Protobuf (Linux)
         if: runner.os == 'Linux' && contains(matrix.package.features, 'system')
@@ -264,8 +264,7 @@ jobs:
           cargo test
           --package "${{ matrix.package.name }}"
           --features "${{ matrix.package.features }}"
-          --all-targets
-          --only-packages-with-lib-target --doc
+          --all-targets --doc
 
       - name: Doc-test (release)
         if: runner.os == 'Windows' || contains(matrix.package.features, 'build-from-source') || contains(matrix.package.features, 'static')
@@ -275,8 +274,7 @@ jobs:
           --release
           --package "${{ matrix.package.name }}"
           --features "${{ matrix.package.features }}"
-          --all-targets
-          --only-packages-with-lib-target --doc
+          --all-targets --doc
 
   publish:
     name: publish (dry-run)
