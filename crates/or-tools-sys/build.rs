@@ -38,8 +38,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let link_kind = if link_static { "static" } else { "dylib" };
 
     println!("cargo:rustc-link-lib={link_kind}=ortools");
-    println!("cargo:rustc-link-lib={link_kind}=protobuf");
-    println!("cargo:rustc-link-lib={link_kind}=protobuf-lite");
+
+    // OR-Tools' static builds don't always provide static archives for every
+    // dependency. Prefer static linking, but fall back to dynamic when needed.
+    let protobuf_kind = if link_static && !lib_dir.join("libprotobuf.a").is_file() {
+        "dylib"
+    } else {
+        link_kind
+    };
+    let protobuf_lite_kind = if link_static && !lib_dir.join("libprotobuf-lite.a").is_file() {
+        "dylib"
+    } else {
+        link_kind
+    };
+
+    println!("cargo:rustc-link-lib={protobuf_kind}=protobuf");
+    println!("cargo:rustc-link-lib={protobuf_lite_kind}=protobuf-lite");
 
     if link_static {
         emit_static_dep_links(&lib_dir)?;
@@ -143,20 +157,17 @@ fn resolve_ortools() -> Result<(PathBuf, PathBuf, bool, bool), Box<dyn std::erro
             .into());
         }
         Err(_) => {
-            let mut selected = Vec::new();
+            // Multiple backends may be enabled (e.g. via dependency defaults +
+            // explicit feature selection). Prefer an explicitly-requested backend
+            // over defaults.
             if feature_system {
-                selected.push(Backend::System);
-            }
-            if feature_vendor_prebuilt {
-                selected.push(Backend::VendorPrebuilt);
-            }
-            if feature_build_from_source {
-                selected.push(Backend::BuildFromSource);
-            }
-
-            match selected.as_slice() {
-                [only] => *only,
-                _ => Backend::System,
+                Backend::System
+            } else if feature_build_from_source {
+                Backend::BuildFromSource
+            } else if feature_vendor_prebuilt {
+                Backend::VendorPrebuilt
+            } else {
+                Backend::System
             }
         }
     };
@@ -225,10 +236,13 @@ fn build_ortools_from_source(link_static: bool) -> Result<String, Box<dyn std::e
     cfg.define("BUILD_DEPS", "ON");
 
     // Lean defaults: disable optional components unless explicitly enabled.
-    let enable_math_opt = std::env::var("CARGO_FEATURE_MATH_OPT").is_ok();
-    let enable_flatzinc = std::env::var("CARGO_FEATURE_FLATZINC").is_ok();
-    cfg.define("BUILD_MATH_OPT", if enable_math_opt { "ON" } else { "OFF" });
-    cfg.define("BUILD_FLATZINC", if enable_flatzinc { "ON" } else { "OFF" });
+    // OR-Tools' upstream CMake currently assumes MathOpt proto targets exist
+    // (e.g. gurobi integration links against them). This means MathOpt is not
+    // fully optional for a source build.
+    let build_mathiopt = true;
+    let build_flatzinc = std::env::var("CARGO_FEATURE_FLATZINC").is_ok();
+    cfg.define("BUILD_MATH_OPT", if build_mathiopt { "ON" } else { "OFF" });
+    cfg.define("BUILD_FLATZINC", if build_flatzinc { "ON" } else { "OFF" });
 
     // Optional third-party solvers: default OFF for CP-SAT-focused usage.
     // Note: Some solvers are "OFF not supported" upstream (e.g. GLOP/BOP), so we
@@ -245,10 +259,11 @@ fn build_ortools_from_source(link_static: bool) -> Result<String, Box<dyn std::e
     cfg.define("USE_SCIP", if use_scip { "ON" } else { "OFF" });
     cfg.define("USE_GLPK", if use_glpk { "ON" } else { "OFF" });
     cfg.define("USE_CPLEX", "OFF");
-    // These are ON-by-default upstream (and "OFF not supported" in some configs),
-    // but they currently depend on MathOpt targets.
-    cfg.define("USE_GUROBI", "OFF");
-    cfg.define("USE_XPRESS", "OFF");
+    // These are ON-by-default upstream and are dynamically loaded.
+    // Keep them ON explicitly to avoid stale CMakeCache values from older builds
+    // and because upstream configuration assumes these targets/symbols exist.
+    cfg.define("USE_GUROBI", "ON");
+    cfg.define("USE_XPRESS", "ON");
 
     if link_static {
         cfg.define("BUILD_SHARED_LIBS", "OFF");

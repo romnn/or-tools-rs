@@ -68,7 +68,9 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Homebrew/actions/setup-homebrew@master
       - uses: dtolnay/rust-toolchain@nightly
-      - run: brew install cargo-udeps
+      - run: |
+          brew install cargo-udeps
+          brew install protobuf
       - name: Check for outdated dependencies
         run: task unused-dependencies
 

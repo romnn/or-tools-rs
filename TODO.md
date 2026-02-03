@@ -1,0 +1,7 @@
+- CI
+    - add windows
+    - add timeout of 30 minutes for each job
+    - when static in feature matrix: ensure indeed static
+    - when vendor prebuilt: download or-tools into some folder and set via env
+    - when from source: ensure build dependencies are installed
+    - when system: ensure protobuf and or-tools are installed on the system in some way

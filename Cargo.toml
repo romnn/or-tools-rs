@@ -22,3 +22,6 @@ unreachable = "deny"
 unimplemented = "deny"
 todo = "deny"
 indexing_slicing = "deny"
+
+[workspace.metadata.cargo-feature-combinations]
+exclude_packages = ["clippy-wrapper", "or-tools-sys"]

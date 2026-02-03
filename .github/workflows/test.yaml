@@ -11,28 +11,144 @@ on:
 jobs:
   feature-matrix:
     uses: ./.github/workflows/feature-matrix.yaml
+    timeout-minutes: 30
 
   test:
     name: test ${{ matrix.package.name }} (${{ matrix.os }}, features ${{ matrix.package.features }})
     runs-on: ${{ matrix.os }}
     needs: [feature-matrix]
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-24.04]
+        os: [macos-latest, ubuntu-24.04, windows-latest]
         package: ${{ fromJson(needs.feature-matrix.outputs.matrix) }}
+        include:
+          - os: macos-latest
+            package:
+              name: or-tools
+              features: system
+          - os: ubuntu-24.04
+            package:
+              name: or-tools
+              features: system
+    env:
+      OR_TOOLS_SYS_PREBUILT_VERSION: "9.15"
+      OR_TOOLS_SYS_PREBUILT_BUILD: "6755"
     steps:
       - uses: actions/checkout@v6
       - uses: arduino/setup-task@v2
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: dtolnay/rust-toolchain@stable
-      - name: Configure git author
-        run: |
-          git config --global user.email "test@example.com"
-          git config --global user.name "test"
 
-      - name: Test
+      - name: Force build-from-source on Windows
+        if: runner.os == 'Windows' && !contains(matrix.package.features, 'system')
+        shell: bash
+        run: |-
+          echo "OR_TOOLS_SYS_BACKEND=build-from-source" >> "$GITHUB_ENV"
+
+      - name: Install build dependencies (build-from-source)
+        if: runner.os == 'Linux' && (contains(matrix.package.features, 'build-from-source') || contains(matrix.package.features, 'static'))
+        shell: bash
+        run: |-
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            curl \
+            tar
+
+      - name: Install build dependencies (build-from-source)
+        if: runner.os == 'macOS' && (contains(matrix.package.features, 'build-from-source') || contains(matrix.package.features, 'static'))
+        shell: bash
+        run: |-
+          brew update
+          brew install cmake ninja
+
+      - name: Install build dependencies (build-from-source)
+        if: runner.os == 'Windows' && !contains(matrix.package.features, 'system')
+        shell: bash
+        run: |-
+          choco install -y cmake ninja
+
+      - name: Install system OR-Tools + Protobuf (Linux)
+        if: runner.os == 'Linux' && contains(matrix.package.features, 'system')
+        shell: bash
+        run: |-
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libortools-dev \
+            libprotobuf-dev \
+            protobuf-compiler
+          ORTOOLS_LIB_PATH="$(ldconfig -p | awk '/libortools\.so/{print $NF; exit}')"
+          if [ -z "${ORTOOLS_LIB_PATH}" ]; then
+            echo "failed to locate libortools.so via ldconfig" >&2
+            exit 1
+          fi
+          ORTOOLS_LIB_DIR="$(dirname "${ORTOOLS_LIB_PATH}")"
+          PREFIX="${RUNNER_TEMP}/or-tools-system"
+          rm -rf "${PREFIX}"
+          mkdir -p "${PREFIX}"
+          ln -s /usr/include "${PREFIX}/include"
+          ln -s "${ORTOOLS_LIB_DIR}" "${PREFIX}/lib"
+          echo "OR_TOOLS_SYS_BACKEND=system" >> "$GITHUB_ENV"
+          echo "ORTOOLS_PREFIX=${PREFIX}" >> "$GITHUB_ENV"
+
+      - name: Install system OR-Tools + Protobuf (macOS)
+        if: runner.os == 'macOS' && contains(matrix.package.features, 'system')
+        shell: bash
+        run: |-
+          brew update
+          brew install or-tools protobuf
+          ORTOOLS_PREFIX_BREW="$(brew --prefix or-tools)"
+          PROTOBUF_PREFIX_BREW="$(brew --prefix protobuf)"
+          PREFIX="${RUNNER_TEMP}/or-tools-system"
+          rm -rf "${PREFIX}"
+          mkdir -p "${PREFIX}/include" "${PREFIX}/lib"
+          ln -s "${ORTOOLS_PREFIX_BREW}/include/ortools" "${PREFIX}/include/ortools"
+          for lib in libortools.dylib libprotobuf.dylib libprotobuf-lite.dylib; do
+            if [ -f "${ORTOOLS_PREFIX_BREW}/lib/${lib}" ]; then
+              ln -s "${ORTOOLS_PREFIX_BREW}/lib/${lib}" "${PREFIX}/lib/${lib}"
+              continue
+            fi
+            if [ -f "${PROTOBUF_PREFIX_BREW}/lib/${lib}" ]; then
+              ln -s "${PROTOBUF_PREFIX_BREW}/lib/${lib}" "${PREFIX}/lib/${lib}"
+              continue
+            fi
+          done
+          echo "OR_TOOLS_SYS_BACKEND=system" >> "$GITHUB_ENV"
+          echo "ORTOOLS_PREFIX=${PREFIX}" >> "$GITHUB_ENV"
+
+      - name: Download OR-Tools prebuilt (nonstandard prefix)
+        if: runner.os != 'Windows' && contains(matrix.package.features, 'vendor-prebuilt')
+        shell: bash
+        run: |-
+          VERSION="${OR_TOOLS_SYS_PREBUILT_VERSION}"
+          BUILD="${OR_TOOLS_SYS_PREBUILT_BUILD}"
+          PREFIX_BASE="${RUNNER_TEMP}/or-tools-prebuilt"
+          rm -rf "${PREFIX_BASE}"
+          mkdir -p "${PREFIX_BASE}"
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            ASSET="or-tools_amd64_ubuntu-24.04_cpp_v${VERSION}.${BUILD}.tar.gz"
+          else
+            ASSET="or-tools_arm64_macOS-26.2_cpp_v${VERSION}.${BUILD}.tar.gz"
+          fi
+          URL="https://github.com/google/or-tools/releases/download/v${VERSION}/${ASSET}"
+          curl -L --fail -o "${PREFIX_BASE}/${ASSET}" "${URL}"
+          tar -xzf "${PREFIX_BASE}/${ASSET}" -C "${PREFIX_BASE}"
+          PREFIX_DIR="$(find "${PREFIX_BASE}" -maxdepth 1 -mindepth 1 -type d | head -n 1)"
+          if [ -z "${PREFIX_DIR}" ]; then
+            echo "failed to locate extracted OR-Tools prefix" >&2
+            exit 1
+          fi
+          echo "OR_TOOLS_SYS_BACKEND=system" >> "$GITHUB_ENV"
+          echo "ORTOOLS_PREFIX=${PREFIX_DIR}" >> "$GITHUB_ENV"
+
+      - name: Test (debug)
+        if: runner.os != 'Windows' && !contains(matrix.package.features, 'build-from-source') && !contains(matrix.package.features, 'static')
         # prettier-ignore
         run: >-
           cargo test
@@ -40,26 +156,128 @@ jobs:
           --features "${{ matrix.package.features }}"
           --all-targets
 
-  doc-tests:
-    name: doc-tests (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, ubuntu-24.04]
-    steps:
-      - uses: actions/checkout@v6
-      - uses: arduino/setup-task@v2
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: romnn/cargo-feature-combinations@main
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Doc-tests
-        run: cargo fc test --only-packages-with-lib-target --doc
+      - name: Test (release)
+        if: runner.os == 'Windows' || contains(matrix.package.features, 'build-from-source') || contains(matrix.package.features, 'static')
+        # prettier-ignore
+        run: >-
+          cargo test
+          --release
+          --package "${{ matrix.package.name }}"
+          --features "${{ matrix.package.features }}"
+          --all-targets
+
+      - name: Verify static OR-Tools link (Linux)
+        if: runner.os == 'Linux' && contains(matrix.package.features, 'static')
+        shell: bash
+        run: |-
+          CRATE_BIN_PREFIX="${{ matrix.package.name }}"
+          CRATE_BIN_PREFIX="${CRATE_BIN_PREFIX//-/_}"
+          FOUND=0
+          for f in target/release/deps/${CRATE_BIN_PREFIX}-*; do
+            if [ -f "${f}" ] && file "${f}" | grep -q "ELF"; then
+              FOUND=1
+              if ldd "${f}" | grep -q "libortools"; then
+                echo "expected static OR-Tools link, but found dynamic libortools for ${f}" >&2
+                exit 1
+              fi
+            fi
+          done
+          if [ "${FOUND}" -eq 0 ]; then
+            echo "no test binaries found to verify static linking" >&2
+            exit 1
+          fi
+
+      - name: Verify static OR-Tools link (macOS)
+        if: runner.os == 'macOS' && contains(matrix.package.features, 'static')
+        shell: bash
+        run: |-
+          CRATE_BIN_PREFIX="${{ matrix.package.name }}"
+          CRATE_BIN_PREFIX="${CRATE_BIN_PREFIX//-/_}"
+          FOUND=0
+          for f in target/release/deps/${CRATE_BIN_PREFIX}-*; do
+            if [ -f "${f}" ] && file "${f}" | grep -q "Mach-O"; then
+              FOUND=1
+              if otool -L "${f}" | grep -q "libortools"; then
+                echo "expected static OR-Tools link, but found dynamic libortools for ${f}" >&2
+                exit 1
+              fi
+            fi
+          done
+          if [ "${FOUND}" -eq 0 ]; then
+            echo "no test binaries found to verify static linking" >&2
+            exit 1
+          fi
+
+      - name: Verify static OR-Tools link (Windows)
+        if: runner.os == 'Windows' && contains(matrix.package.features, 'static')
+        shell: pwsh
+        run: |-
+          $crate = "${{ matrix.package.name }}" -replace "-", "_"
+          $depsDir = Join-Path $PWD "target/release/deps"
+          if (-not (Test-Path $depsDir)) {
+            throw "missing $depsDir"
+          }
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          if (-not (Test-Path $vswhere)) {
+            throw "vswhere not found at $vswhere"
+          }
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) {
+            throw "failed to locate Visual Studio installation"
+          }
+          $dumpbin = Get-ChildItem -Path (Join-Path $vs "VC/Tools/MSVC") -Recurse -Filter dumpbin.exe |
+            Where-Object { $_.FullName -match "Hostx64\\x64" } |
+            Select-Object -First 1
+          if (-not $dumpbin) {
+            throw "failed to locate dumpbin.exe"
+          }
+          $exes = Get-ChildItem -Path $depsDir -Filter "${crate}-*.exe" -File
+          if (-not $exes) {
+            throw "no test binaries found to verify static linking"
+          }
+          foreach ($exe in $exes) {
+            $out = & $dumpbin.FullName /DEPENDENTS $exe.FullName
+            if ($out -match "ortools") {
+              throw "expected static OR-Tools link, but found OR-Tools as dependent DLL for $($exe.FullName)"
+            }
+          }
+
+      - name: Compile tests in release mode
+        if: runner.os != 'Windows' && !contains(matrix.package.features, 'build-from-source') && !contains(matrix.package.features, 'static')
+        # prettier-ignore
+        run: >-
+          cargo test
+          --no-run
+          --release
+          --package "${{ matrix.package.name }}"
+          --features "${{ matrix.package.features }}"
+          --all-targets
+
+      - name: Doc-test
+        if: runner.os != 'Windows' && !contains(matrix.package.features, 'build-from-source') && !contains(matrix.package.features, 'static')
+        # prettier-ignore
+        run: >-
+          cargo test
+          --package "${{ matrix.package.name }}"
+          --features "${{ matrix.package.features }}"
+          --all-targets
+          --only-packages-with-lib-target --doc
+
+      - name: Doc-test (release)
+        if: runner.os == 'Windows' || contains(matrix.package.features, 'build-from-source') || contains(matrix.package.features, 'static')
+        # prettier-ignore
+        run: >-
+          cargo test
+          --release
+          --package "${{ matrix.package.name }}"
+          --features "${{ matrix.package.features }}"
+          --all-targets
+          --only-packages-with-lib-target --doc
 
   publish:
     name: publish (dry-run)
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable

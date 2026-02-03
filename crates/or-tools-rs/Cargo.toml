@@ -10,17 +10,6 @@ doctest = false
 [lints]
 workspace = true
 
-[dependencies]
-or-tools-sys = { path = "../or-tools-sys" }
-prost = "0.14"
-bytes = "1"
-libc = "0"
-smallvec = { version = "1", default-features = false, features = ["union"]}
-
-[build-dependencies]
-prost-build = { version = "0.14" }
-or-tools-sys = { path = "../or-tools-sys" }
-
 [features]
 default = ["vendor-prebuilt"]
 system = ["or-tools-sys/system"]
@@ -35,3 +24,38 @@ solver-highs = ["or-tools-sys/solver-highs"]
 solver-pdlp = ["or-tools-sys/solver-pdlp"]
 solver-scip = ["or-tools-sys/solver-scip"]
 solver-glpk = ["or-tools-sys/solver-glpk"]
+
+[package.metadata.cargo-feature-combinations]
+exclude_features = ["default", "system"]
+isolated_feature_sets = [
+    ["math-opt"],
+    ["flatzinc"],
+    ["solver-coinor"],
+    ["solver-highs"],
+    ["solver-pdlp"],
+    ["solver-scip"],
+    ["solver-glpk"],
+]
+include_feature_sets = [
+    ["vendor-prebuilt"],
+    ["build-from-source"],
+    ["static"],
+    ["build-from-source", "math-opt"],
+    ["build-from-source", "flatzinc"],
+    ["build-from-source", "solver-coinor"],
+    ["build-from-source", "solver-highs"],
+    ["build-from-source", "solver-pdlp"],
+    ["build-from-source", "solver-scip"],
+    ["build-from-source", "solver-glpk"],
+]
+
+[dependencies]
+or-tools-sys = { path = "../or-tools-sys" }
+prost = "0.14"
+bytes = "1"
+libc = "0"
+smallvec = { version = "1", default-features = false, features = ["union"]}
+
+[build-dependencies]
+prost-build = { version = "0.14" }
+or-tools-sys = { path = "../or-tools-sys" }
