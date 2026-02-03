@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-24.04]
+        os: [macos-latest, ubuntu-24.04, windows-latest]
         package: ${{ fromJson(needs.feature-matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
@@ -30,7 +30,7 @@ jobs:
       - name: Lint
         # prettier-ignore
         run: >-
-          carg lint
+          cargo lint
           --package "${{ matrix.package.name }}"
           --features "${{ matrix.package.features }}"
 
