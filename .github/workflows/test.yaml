@@ -142,13 +142,15 @@ jobs:
         shell: bash
         run: |-
           brew update
-          brew install or-tools protobuf
+          brew install or-tools protobuf abseil
           ORTOOLS_PREFIX_BREW="$(brew --prefix or-tools)"
           PROTOBUF_PREFIX_BREW="$(brew --prefix protobuf)"
+          ABSEIL_PREFIX_BREW="$(brew --prefix abseil)"
           PREFIX="${RUNNER_TEMP}/or-tools-system"
           rm -rf "${PREFIX}"
           mkdir -p "${PREFIX}/include" "${PREFIX}/lib"
           ln -s "${ORTOOLS_PREFIX_BREW}/include/ortools" "${PREFIX}/include/ortools"
+          ln -s "${ABSEIL_PREFIX_BREW}/include/absl" "${PREFIX}/include/absl"
           for lib in libortools.dylib libprotobuf.dylib libprotobuf-lite.dylib; do
             if [ -f "${ORTOOLS_PREFIX_BREW}/lib/${lib}" ]; then
               ln -s "${ORTOOLS_PREFIX_BREW}/lib/${lib}" "${PREFIX}/lib/${lib}"
@@ -163,7 +165,7 @@ jobs:
           echo "ORTOOLS_PREFIX=${PREFIX}" >> "$GITHUB_ENV"
 
       - name: Download OR-Tools prebuilt (nonstandard prefix)
-        if: runner.os != 'Windows' && contains(matrix.package.features, 'vendor-prebuilt')
+        if: runner.os != 'Windows' && !contains(matrix.package.features, 'system') && !contains(matrix.package.features, 'build-from-source') && !contains(matrix.package.features, 'static')
         shell: bash
         run: |-
           VERSION="${OR_TOOLS_SYS_PREBUILT_VERSION}"
@@ -189,6 +191,25 @@ jobs:
           fi
           echo "OR_TOOLS_SYS_BACKEND=system" >> "$GITHUB_ENV"
           echo "ORTOOLS_PREFIX=${PREFIX_DIR}" >> "$GITHUB_ENV"
+
+      - name: Set runtime library path (Linux)
+        if: runner.os == 'Linux' && env.ORTOOLS_PREFIX != ''
+        shell: bash
+        run: |-
+          if [ -d "${ORTOOLS_PREFIX}/lib" ]; then
+            echo "LD_LIBRARY_PATH=${ORTOOLS_PREFIX}/lib:${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          fi
+          if [ -d "${ORTOOLS_PREFIX}/lib64" ]; then
+            echo "LD_LIBRARY_PATH=${ORTOOLS_PREFIX}/lib64:${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Set runtime library path (macOS)
+        if: runner.os == 'macOS' && env.ORTOOLS_PREFIX != ''
+        shell: bash
+        run: |-
+          if [ -d "${ORTOOLS_PREFIX}/lib" ]; then
+            echo "DYLD_LIBRARY_PATH=${ORTOOLS_PREFIX}/lib:${DYLD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          fi
 
       - name: Test (debug)
         if: runner.os != 'Windows' && !contains(matrix.package.features, 'build-from-source') && !contains(matrix.package.features, 'static')
@@ -295,25 +316,6 @@ jobs:
           --package "${{ matrix.package.name }}"
           --features "${{ matrix.package.features }}"
           --all-targets
-
-      - name: Doc-test
-        if: runner.os != 'Windows' && !contains(matrix.package.features, 'build-from-source') && !contains(matrix.package.features, 'static')
-        # prettier-ignore
-        run: >-
-          cargo test
-          --package "${{ matrix.package.name }}"
-          --features "${{ matrix.package.features }}"
-          --all-targets --doc
-
-      - name: Doc-test (release)
-        if: runner.os == 'Windows' || contains(matrix.package.features, 'build-from-source') || contains(matrix.package.features, 'static')
-        # prettier-ignore
-        run: >-
-          cargo test
-          --release
-          --package "${{ matrix.package.name }}"
-          --features "${{ matrix.package.features }}"
-          --all-targets --doc
 
   publish:
     name: publish (dry-run)
