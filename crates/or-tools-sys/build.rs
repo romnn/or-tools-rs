@@ -15,6 +15,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/cp_sat_wrapper.cpp");
     println!("cargo:rerun-if-env-changed=ORTOOLS_PREFIX");
     println!("cargo:rerun-if-env-changed=ORTOOL_PREFIX");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_STATIC");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_BUILD_FROM_SOURCE");
     println!("cargo:rerun-if-env-changed=OR_TOOLS_SYS_SOURCE_DIR");
     println!("cargo:rerun-if-env-changed=OR_TOOLS_SYS_PREBUILT_VERSION");
     println!("cargo:rerun-if-env-changed=OR_TOOLS_SYS_PREBUILT_BUILD");
@@ -115,8 +117,51 @@ fn emit_static_dep_links(lib_dir: &Path) -> Result<(), Box<dyn std::error::Error
     }
     absl_libs.sort();
 
-    for lib in absl_libs {
-        println!("cargo:rustc-link-lib=static={lib}");
+    if absl_libs.is_empty() {
+        // Some OR-Tools "static" builds still install Abseil as shared libraries.
+        // In that case, link the Abseil components dynamically.
+        let mut absl_dylibs = Vec::new();
+        for entry in std::fs::read_dir(lib_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+
+            let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+
+            let suffix = if std::path::Path::new(file_name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("so"))
+            {
+                ".so"
+            } else if std::path::Path::new(file_name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("dylib"))
+            {
+                ".dylib"
+            } else {
+                continue;
+            };
+
+            if let Some(name) = file_name
+                .strip_prefix("libabsl_")
+                .and_then(|s| s.strip_suffix(suffix))
+            {
+                absl_dylibs.push(format!("absl_{name}"));
+            }
+        }
+        absl_dylibs.sort();
+        absl_dylibs.dedup();
+        for lib in absl_dylibs {
+            println!("cargo:rustc-link-lib=dylib={lib}");
+        }
+    } else {
+        for lib in absl_libs {
+            println!("cargo:rustc-link-lib=static={lib}");
+        }
     }
 
     // Other dependency archives built/installed by OR-Tools that may be needed for
@@ -193,7 +238,7 @@ fn resolve_ortools() -> Result<(PathBuf, PathBuf, bool, bool), Box<dyn std::erro
     let include_dir = PathBuf::from(&prefix).join("include");
     let lib_dir = ortools_lib_dir(&prefix);
 
-    let emit_rpath = !link_static;
+    let emit_rpath = backend != Backend::System;
     Ok((include_dir, lib_dir, emit_rpath, link_static))
 }
 
@@ -219,6 +264,15 @@ fn build_ortools_from_source(link_static: bool) -> Result<String, Box<dyn std::e
     let out_dir = PathBuf::from(std::env::var("OUT_DIR")?);
 
     let source_dir = prepare_ortools_source_dir()?;
+    let source_dir = if link_static {
+        prepare_patchable_source_dir_for_static(&source_dir, &out_dir)?
+    } else {
+        source_dir
+    };
+
+    if link_static {
+        patch_downloaded_ortools_deps_for_static(&source_dir)?;
+    }
 
     let install_dir = out_dir.join("or_tools_install");
 
@@ -275,8 +329,10 @@ fn build_ortools_from_source(link_static: bool) -> Result<String, Box<dyn std::e
 
     if link_static {
         cfg.define("BUILD_SHARED_LIBS", "OFF");
+        cfg.define("OR_TOOLS_SYS_FORCE_STATIC_DEPS", "ON");
     } else {
         cfg.define("BUILD_SHARED_LIBS", "ON");
+        cfg.define("OR_TOOLS_SYS_FORCE_STATIC_DEPS", "OFF");
     }
 
     // OR-Tools defaults to C++17 on non-MSVC; keep this aligned for compatibility.
@@ -287,6 +343,144 @@ fn build_ortools_from_source(link_static: bool) -> Result<String, Box<dyn std::e
     let _dst = cfg.build();
 
     Ok(install_dir.to_string_lossy().to_string())
+}
+
+fn prepare_patchable_source_dir_for_static(
+    source_dir: &Path,
+    out_dir: &Path,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let workspace_root = workspace_root()?;
+    let vendored_source_dir = workspace_root.join("vendor/or-tools").canonicalize()?;
+    let source_dir = source_dir.canonicalize()?;
+
+    if source_dir != vendored_source_dir {
+        return Ok(source_dir);
+    }
+
+    let scratch_dir = out_dir.join("or_tools_source_scratch");
+    let marker = scratch_dir.join(".or-tools-sys-version");
+    let expected_header = scratch_dir.join("ortools/sat/cp_model.h");
+
+    if scratch_dir.is_dir() {
+        let marker_version = std::fs::read_to_string(&marker)
+            .ok()
+            .map(|s| s.trim().to_string());
+        if expected_header.is_file()
+            && marker_version
+                .as_deref()
+                .is_some_and(|v| v == ORTOOLS_VERSION)
+        {
+            return Ok(scratch_dir);
+        }
+
+        std::fs::remove_dir_all(&scratch_dir)?;
+    }
+
+    copy_dir_all(&source_dir, &scratch_dir)?;
+    std::fs::write(&marker, ORTOOLS_VERSION)?;
+    Ok(scratch_dir)
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(dst)?;
+
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        if file_name.to_string_lossy() == ".git" {
+            continue;
+        }
+
+        let src_path = entry.path();
+        let dst_path = dst.join(&file_name);
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            copy_dir_all(&src_path, &dst_path)?;
+        } else if ty.is_file() {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn patch_downloaded_ortools_deps_for_static(
+    source_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let workspace_root = workspace_root()?;
+    let vendored_source_dir = workspace_root.join("vendor/or-tools").canonicalize()?;
+    let source_dir = source_dir.canonicalize()?;
+
+    if source_dir == vendored_source_dir {
+        return Ok(());
+    }
+
+    let marker = source_dir.join(".or-tools-sys-version");
+    let safe_to_patch = marker.is_file() || !source_dir.starts_with(&workspace_root);
+    if !safe_to_patch {
+        return Ok(());
+    }
+
+    let deps_cmake = source_dir.join("cmake/dependencies/CMakeLists.txt");
+    if !deps_cmake.is_file() {
+        return Ok(());
+    }
+
+    let original = std::fs::read_to_string(&deps_cmake)?;
+    if original.contains("OR_TOOLS_SYS_FORCE_STATIC_DEPS") {
+        return Ok(());
+    }
+
+    let mut out = String::with_capacity(original.len() + 256);
+    for line in original.lines() {
+        let trimmed = line.trim();
+
+        out.push_str(line);
+        out.push('\n');
+
+        if trimmed == "set(FETCHCONTENT_UPDATES_DISCONNECTED ON)" {
+            let indent_len = line.len() - line.trim_start().len();
+            let indent = &line[..indent_len];
+            out.push_str(indent);
+            out.push_str("if(OR_TOOLS_SYS_FORCE_STATIC_DEPS)\n");
+            out.push_str(indent);
+            out.push_str("  set(BUILD_SHARED_LIBS OFF)\n");
+            out.push_str(indent);
+            out.push_str("  set(protobuf_BUILD_SHARED_LIBS OFF)\n");
+            out.push_str(indent);
+            out.push_str("endif()\n");
+        }
+
+        if trimmed == "set(BUILD_SHARED_LIBS ON)" {
+            let indent_len = line.len() - line.trim_start().len();
+            let indent = &line[..indent_len];
+            out.truncate(out.len().saturating_sub(line.len() + 1));
+            out.push_str(indent);
+            out.push_str("if(NOT OR_TOOLS_SYS_FORCE_STATIC_DEPS)\n");
+            out.push_str(indent);
+            out.push_str("  set(BUILD_SHARED_LIBS ON)\n");
+            out.push_str(indent);
+            out.push_str("endif()\n");
+            continue;
+        }
+        if trimmed == "set(protobuf_BUILD_SHARED_LIBS ON)" {
+            let indent_len = line.len() - line.trim_start().len();
+            let indent = &line[..indent_len];
+            out.truncate(out.len().saturating_sub(line.len() + 1));
+            out.push_str(indent);
+            out.push_str("if(NOT OR_TOOLS_SYS_FORCE_STATIC_DEPS)\n");
+            out.push_str(indent);
+            out.push_str("  set(protobuf_BUILD_SHARED_LIBS ON)\n");
+            out.push_str(indent);
+            out.push_str("endif()\n");
+        }
+    }
+
+    std::fs::write(&deps_cmake, out)?;
+    println!(
+        "cargo:warning=or-tools-sys: patched downloaded OR-Tools cmake/dependencies/CMakeLists.txt to avoid forcing shared libs"
+    );
+    Ok(())
 }
 
 fn download_ortools_prebuilt() -> Result<String, Box<dyn std::error::Error>> {
@@ -381,27 +575,40 @@ fn download_ortools_prebuilt() -> Result<String, Box<dyn std::error::Error>> {
 }
 
 fn download(url: &str, out: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let tmp = out.with_extension("tmp");
+    if tmp.exists() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+
     let status = std::process::Command::new("curl")
-        .args(["-L", "--fail", "-o"])
-        .arg(out)
+        .args([
+            "-L",
+            "--fail",
+            "--retry",
+            "10",
+            "--retry-connrefused",
+            "--retry-all-errors",
+            "--retry-delay",
+            "2",
+            "-o",
+        ])
+        .arg(&tmp)
         .arg(url)
         .status();
 
     match status {
-        Ok(s) if s.success() => return Ok(()),
-        _ => {}
+        Ok(s) if s.success() => {}
+        Ok(_) => {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("failed to download {url}").into());
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
+        }
     }
 
-    let status = std::process::Command::new("wget")
-        .args(["-O"])
-        .arg(out)
-        .arg(url)
-        .status()?;
-
-    if !status.success() {
-        return Err(format!("failed to download {url}").into());
-    }
-
+    std::fs::rename(tmp, out)?;
     Ok(())
 }
 
@@ -432,22 +639,28 @@ fn find_first_dir(dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
 fn prepare_ortools_source_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     if let Ok(p) = std::env::var("OR_TOOLS_SYS_SOURCE_DIR") {
         Ok(normalize_windows_path(PathBuf::from(p).canonicalize()?))
-    } else {
-        let source_dir = if cfg!(windows) {
-            if let Ok(tmp) = std::env::var("RUNNER_TEMP") {
-                PathBuf::from(tmp).join("or_tools_source_dir")
-            } else {
-                std::env::temp_dir().join("or_tools_source_dir")
-            }
+    } else if cfg!(windows) {
+        let source_dir = if let Ok(tmp) = std::env::var("RUNNER_TEMP") {
+            PathBuf::from(tmp).join("or_tools_source_dir")
         } else {
-            workspace_root()?.join("vendor/or-tools")
+            std::env::temp_dir().join("or_tools_source_dir")
         };
         ensure_ortools_source_present(&source_dir)?;
-        if cfg!(windows) {
-            Ok(normalize_windows_path(source_dir.canonicalize()?))
-        } else {
-            Ok(source_dir.canonicalize()?)
+        Ok(normalize_windows_path(source_dir.canonicalize()?))
+    } else {
+        let source_dir = workspace_root()?.join("vendor/or-tools");
+
+        // On non-Windows we rely on the repository's vendored OR-Tools checkout.
+        // Do not try to delete/replace it at build time.
+        let expected_header = source_dir.join("ortools/sat/cp_model.h");
+        if !expected_header.is_file() {
+            return Err(
+                "vendored OR-Tools source missing ortools/sat/cp_model.h (did you forget to fetch submodules?)"
+                    .into(),
+            );
         }
+
+        Ok(source_dir.canonicalize()?)
     }
 }
 

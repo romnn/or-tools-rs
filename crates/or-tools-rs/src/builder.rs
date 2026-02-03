@@ -12,8 +12,8 @@ fn i64_to_f64(v: i64) -> f64 {
 /// # Example
 ///
 /// ```
-/// # use cp_sat::builder::CpModelBuilder;
-/// # use cp_sat::proto::CpSolverStatus;
+/// # use or_tools::builder::CpModelBuilder;
+/// # use or_tools::proto::CpSolverStatus;
 /// let mut model = CpModelBuilder::default();
 /// let x = model.new_bool_var();
 /// let y = model.new_bool_var();
@@ -48,8 +48,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::{CpModelBuilder, IntVar};
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::{CpModelBuilder, IntVar};
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_bool_var();
     /// model.add_and([!x]);
@@ -68,8 +68,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_bool_var_with_name("x");
     /// assert_eq!("x", model.var_name(x));
@@ -92,8 +92,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::{CpModelBuilder, IntVar};
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::{CpModelBuilder, IntVar};
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(0, 2), (4, 8)]);
     /// let response = model.solve();
@@ -111,8 +111,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var_with_name([(0, 10)], "x");
     /// assert_eq!("x", model.var_name(x));
@@ -136,7 +136,7 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
+    /// # use or_tools::builder::CpModelBuilder;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_bool_var_with_name("x");
     /// assert_eq!("x", model.var_name(x));
@@ -155,7 +155,7 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
+    /// # use or_tools::builder::CpModelBuilder;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_bool_var();
     /// model.set_var_name(x, "x");
@@ -175,7 +175,7 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
+    /// # use or_tools::builder::CpModelBuilder;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_bool_var();
     /// let constraint = model.add_or([x]);
@@ -194,7 +194,7 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
+    /// # use or_tools::builder::CpModelBuilder;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_bool_var();
     /// let constraint = model.add_or([x]);
@@ -220,8 +220,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_bool_var();
     /// let y = model.new_bool_var();
@@ -256,8 +256,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let a = model.new_bool_var();
     /// let b = model.new_bool_var();
@@ -277,8 +277,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_bool_var();
     /// let y = model.new_bool_var();
@@ -298,8 +298,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_bool_var();
     /// let y = model.new_bool_var();
@@ -320,8 +320,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let vars: Vec<_> = (0..10).map(|_| model.new_bool_var()).collect();
     /// model.add_at_most_one(vars.iter().copied());
@@ -345,8 +345,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let vars: Vec<_> = (0..10).map(|_| model.new_bool_var()).collect();
     /// model.add_exactly_one(vars.iter().copied());
@@ -370,8 +370,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let vars: Vec<_> = (0..10).map(|_| model.new_bool_var()).collect();
     /// model.add_xor(vars.iter().copied());
@@ -396,8 +396,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(0, 2)]);
     /// let y = model.new_int_var([(0, 2)]);
@@ -494,8 +494,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(0, 100)]);
     /// let y = model.new_int_var([(0, 100)]);
@@ -539,8 +539,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::{CpModelBuilder, LinearExpr};
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::{CpModelBuilder, LinearExpr};
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(0, 50)]);
     /// let y = model.new_int_var([(53, 100)]);
@@ -564,8 +564,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::{CpModelBuilder, LinearExpr};
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::{CpModelBuilder, LinearExpr};
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(0, 50)]);
     /// let y = model.new_int_var([(50, 100)]);
@@ -589,8 +589,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::{CpModelBuilder, LinearExpr};
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::{CpModelBuilder, LinearExpr};
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(50, 100)]);
     /// let y = model.new_int_var([(0, 50)]);
@@ -614,8 +614,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::{CpModelBuilder, LinearExpr};
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::{CpModelBuilder, LinearExpr};
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(0, 51)]);
     /// let y = model.new_int_var([(50, 100)]);
@@ -639,8 +639,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::{CpModelBuilder, LinearExpr};
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::{CpModelBuilder, LinearExpr};
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(50, 100)]);
     /// let y = model.new_int_var([(0, 51)]);
@@ -664,8 +664,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::{CpModelBuilder, LinearExpr};
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::{CpModelBuilder, LinearExpr};
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_bool_var();
     /// model.add_ne(x, 1);
@@ -688,8 +688,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::{CpModelBuilder, LinearExpr};
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::{CpModelBuilder, LinearExpr};
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(0, 10)]);
     /// let y = model.new_int_var([(5, 15)]);
@@ -721,8 +721,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::{CpModelBuilder, LinearExpr};
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::{CpModelBuilder, LinearExpr};
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(0, 10)]);
     /// let y = model.new_int_var([(5, 15)]);
@@ -758,8 +758,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(0, 100)]);
     /// let y = model.new_bool_var();
@@ -788,8 +788,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(0, 100)]);
     /// let y = model.new_bool_var();
@@ -810,8 +810,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(0, 100)]);
     /// model.minimize(x);
@@ -840,8 +840,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(0, 100)]);
     /// model.maximize(x);
@@ -873,7 +873,7 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
+    /// # use or_tools::builder::CpModelBuilder;
     /// let model = CpModelBuilder::default();
     /// let stats = model.stats();
     /// assert!(!stats.is_empty());
@@ -891,8 +891,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(0, -1)]);
     /// model.maximize(x);
@@ -908,8 +908,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::CpSolverStatus;
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::CpSolverStatus;
     /// let model = CpModelBuilder::default();
     /// let response = model.solve();
     /// assert_eq!(response.status(), CpSolverStatus::Optimal);
@@ -926,8 +926,8 @@ impl CpModelBuilder {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::{CpSolverStatus, SatParameters};
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::{CpSolverStatus, SatParameters};
     /// let model = CpModelBuilder::default();
     /// let mut params = SatParameters::default();
     /// params.max_deterministic_time = Some(1.);
@@ -952,8 +952,8 @@ impl BoolVar {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::{CpSolverStatus, SatParameters};
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::{CpSolverStatus, SatParameters};
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_bool_var();
     /// model.add_or([x]);
@@ -1017,8 +1017,8 @@ impl IntVar {
     /// # Example
     ///
     /// ```
-    /// # use cp_sat::builder::CpModelBuilder;
-    /// # use cp_sat::proto::{CpSolverStatus, SatParameters};
+    /// # use or_tools::builder::CpModelBuilder;
+    /// # use or_tools::proto::{CpSolverStatus, SatParameters};
     /// let mut model = CpModelBuilder::default();
     /// let x = model.new_int_var([(0, 42)]);
     /// model.maximize(x);
@@ -1066,7 +1066,7 @@ pub struct IntervalVar(i32);
 /// [`CpModelBuilder::maximize`].
 ///
 /// ```
-/// # use cp_sat::builder::{CpModelBuilder, LinearExpr};
+/// # use or_tools::builder::{CpModelBuilder, LinearExpr};
 /// let mut model = CpModelBuilder::default();
 /// let x1 = model.new_int_var([(0, 100)]);
 /// let x2 = model.new_int_var([(0, 100)]);

@@ -1,9 +1,9 @@
-//! The `cp_sat` crate provides an interface to [Google CP
+//! The `or_tools` crate provides an interface to [Google CP
 //! SAT](https://developers.google.com/optimization/cp/cp_solver).
 //!
 //! # OR-Tools installation
 //!
-//! For `cp_sat` to work, you need to have a working OR-Tools
+//! For `or_tools` to work, you need to have a working OR-Tools
 //! installation. By default, this crate will use the default C++
 //! compiler, and add `/opt/ortools` in the search path. If you want
 //! to provide your OR-Tools installation directory, you can define
@@ -18,8 +18,8 @@
 //!
 //! ```
 //! # #![allow(clippy::needless_doctest_main)]
-//! use cp_sat::builder::CpModelBuilder;
-//! use cp_sat::proto::CpSolverStatus;
+//! use or_tools::builder::CpModelBuilder;
+//! use or_tools::proto::CpSolverStatus;
 //!
 //! fn main() {
 //!     let mut model = CpModelBuilder::default();
@@ -33,7 +33,7 @@
 //!     let response = model.solve();
 //!     println!(
 //!         "{}",
-//!         cp_sat::ffi::cp_solver_response_stats(&response, false)
+//!         or_tools::ffi::cp_solver_response_stats(&response, false)
 //!     );
 //!
 //!     if response.status() == CpSolverStatus::Optimal {

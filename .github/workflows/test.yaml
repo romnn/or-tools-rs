@@ -119,23 +119,49 @@ jobs:
         shell: bash
         run: |-
           sudo apt-get update
+          set +e
           sudo apt-get install -y --no-install-recommends \
             libortools-dev \
             libprotobuf-dev \
             protobuf-compiler
-          ORTOOLS_LIB_PATH="$(ldconfig -p | awk '/libortools\.so/{print $NF; exit}')"
-          if [ -z "${ORTOOLS_LIB_PATH}" ]; then
-            echo "failed to locate libortools.so via ldconfig" >&2
-            exit 1
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -eq 0 ]; then
+            ORTOOLS_LIB_PATH="$(ldconfig -p | awk '/libortools\.so/{print $NF; exit}')"
+            if [ -z "${ORTOOLS_LIB_PATH}" ]; then
+              echo "failed to locate libortools.so via ldconfig" >&2
+              exit 1
+            fi
+            ORTOOLS_LIB_DIR="$(dirname "${ORTOOLS_LIB_PATH}")"
+            PREFIX="${RUNNER_TEMP}/or-tools-system"
+            rm -rf "${PREFIX}"
+            mkdir -p "${PREFIX}"
+            ln -s /usr/include "${PREFIX}/include"
+            ln -s "${ORTOOLS_LIB_DIR}" "${PREFIX}/lib"
+            echo "OR_TOOLS_SYS_BACKEND=system" >> "$GITHUB_ENV"
+            echo "ORTOOLS_PREFIX=${PREFIX}" >> "$GITHUB_ENV"
+          else
+            echo "libortools-dev not available on this runner; falling back to upstream OR-Tools prebuilt" >&2
+            VERSION="${OR_TOOLS_SYS_PREBUILT_VERSION}"
+            BUILD="${OR_TOOLS_SYS_PREBUILT_BUILD}"
+            PREFIX_BASE="${OR_TOOLS_SYS_PREBUILT_CACHE_DIR}/v${VERSION}.${BUILD}"
+            mkdir -p "${PREFIX_BASE}"
+            ASSET="or-tools_amd64_ubuntu-24.04_cpp_v${VERSION}.${BUILD}.tar.gz"
+            URL="https://github.com/google/or-tools/releases/download/v${VERSION}/${ASSET}"
+            if [ ! -f "${PREFIX_BASE}/${ASSET}" ]; then
+              curl -L --fail -o "${PREFIX_BASE}/${ASSET}" "${URL}"
+            fi
+            if [ -z "$(find "${PREFIX_BASE}" -maxdepth 1 -mindepth 1 -type d | head -n 1)" ]; then
+              tar -xzf "${PREFIX_BASE}/${ASSET}" -C "${PREFIX_BASE}"
+            fi
+            PREFIX_DIR="$(find "${PREFIX_BASE}" -maxdepth 1 -mindepth 1 -type d | head -n 1)"
+            if [ -z "${PREFIX_DIR}" ]; then
+              echo "failed to locate extracted OR-Tools prefix" >&2
+              exit 1
+            fi
+            echo "OR_TOOLS_SYS_BACKEND=system" >> "$GITHUB_ENV"
+            echo "ORTOOLS_PREFIX=${PREFIX_DIR}" >> "$GITHUB_ENV"
           fi
-          ORTOOLS_LIB_DIR="$(dirname "${ORTOOLS_LIB_PATH}")"
-          PREFIX="${RUNNER_TEMP}/or-tools-system"
-          rm -rf "${PREFIX}"
-          mkdir -p "${PREFIX}"
-          ln -s /usr/include "${PREFIX}/include"
-          ln -s "${ORTOOLS_LIB_DIR}" "${PREFIX}/lib"
-          echo "OR_TOOLS_SYS_BACKEND=system" >> "$GITHUB_ENV"
-          echo "ORTOOLS_PREFIX=${PREFIX}" >> "$GITHUB_ENV"
 
       - name: Install system OR-Tools + Protobuf (macOS)
         if: runner.os == 'macOS' && contains(matrix.package.features, 'system')
@@ -151,6 +177,7 @@ jobs:
           mkdir -p "${PREFIX}/include" "${PREFIX}/lib"
           ln -s "${ORTOOLS_PREFIX_BREW}/include/ortools" "${PREFIX}/include/ortools"
           ln -s "${ABSEIL_PREFIX_BREW}/include/absl" "${PREFIX}/include/absl"
+          ln -s "${PROTOBUF_PREFIX_BREW}/include/google" "${PREFIX}/include/google"
           for lib in libortools.dylib libprotobuf.dylib libprotobuf-lite.dylib; do
             if [ -f "${ORTOOLS_PREFIX_BREW}/lib/${lib}" ]; then
               ln -s "${ORTOOLS_PREFIX_BREW}/lib/${lib}" "${PREFIX}/lib/${lib}"
@@ -316,6 +343,25 @@ jobs:
           --package "${{ matrix.package.name }}"
           --features "${{ matrix.package.features }}"
           --all-targets
+
+      - name: Doc-test
+        if: runner.os != 'Windows' && !contains(matrix.package.features, 'build-from-source') && !contains(matrix.package.features, 'static')
+        # prettier-ignore
+        run: >-
+          cargo test
+          --package "${{ matrix.package.name }}"
+          --features "${{ matrix.package.features }}"
+          --doc
+
+      - name: Doc-test (release)
+        if: runner.os == 'Windows' || contains(matrix.package.features, 'build-from-source') || contains(matrix.package.features, 'static')
+        # prettier-ignore
+        run: >-
+          cargo test
+          --release
+          --package "${{ matrix.package.name }}"
+          --features "${{ matrix.package.features }}"
+          --doc
 
   publish:
     name: publish (dry-run)

@@ -168,9 +168,9 @@ pub fn validate_cp_model(model: &proto::CpModelProto) -> String {
 /// # Example
 ///
 /// ```
-/// # use cp_sat::builder::CpModelBuilder;
-/// # use cp_sat::proto::CpSolverStatus;
-/// # use cp_sat::ffi::solution_is_feasible;
+/// # use or_tools::builder::CpModelBuilder;
+/// # use or_tools::proto::CpSolverStatus;
+/// # use or_tools::ffi::solution_is_feasible;
 /// let mut model = CpModelBuilder::default();
 /// let x = model.new_bool_var();
 /// let y = model.new_bool_var();
