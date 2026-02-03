@@ -1,6 +1,12 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 version: "3"
 tasks:
+  typos:
+    desc: "check repository for typos"
+    aliases: [spellcheck]
+    cmds:
+      - typos
+
   test:
     desc: "run unit tests in cargo workspace"
     aliases: ["test:unit"]

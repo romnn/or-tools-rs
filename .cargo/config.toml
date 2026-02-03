@@ -1,0 +1,6 @@
+[alias]
+xtask = "run --package xtask --"
+clippy-wrapper = "run --package clippy-wrapper --"
+
+lint = "clippy-wrapper lint"
+fixit = "clippy-wrapper fixit"
