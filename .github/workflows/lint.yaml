@@ -36,7 +36,7 @@ jobs:
         run: |-
           echo "OR_TOOLS_SYS_CACHE_DIR=${RUNNER_TEMP}/or-tools-sys-cache" >> "$GITHUB_ENV"
 
-      - uses: mozilla-actions/sccache-action@v0.0.5
+      - uses: mozilla-actions/sccache-action@v0.0.9
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -85,9 +85,7 @@ jobs:
       #     echo "OR_TOOLS_SYS_BACKEND=build-from-source" >> "$GITHUB_ENV"
 
       - name: Lint
-        # prettier-ignore
-        run: >-
-          cargo lint
+        run: cargo lint
 
       # --package "${{ matrix.package.name }}"
       # --features "${{ matrix.package.features }}"

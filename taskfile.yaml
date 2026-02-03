@@ -127,3 +127,9 @@ tasks:
         --fix --allow-dirty --allow-staged
         --all-targets --all-features
         -- -Dclippy::all -Dclippy::pedantic {{.CLI_ARGS}}
+
+  ci:lint:
+    desc: "lint github actions"
+    aliases: ["actions:lint"]
+    cmds:
+      - actionlint

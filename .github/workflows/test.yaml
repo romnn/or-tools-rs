@@ -63,7 +63,7 @@ jobs:
           "OR_TOOLS_SYS_CACHE_DIR=$env:RUNNER_TEMP/or-tools-sys-cache" | Out-File -FilePath $env:GITHUB_ENV -Append
           "OR_TOOLS_SYS_PREBUILT_CACHE_DIR=$env:RUNNER_TEMP/or-tools-prebuilt" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - uses: mozilla-actions/sccache-action@v0.0.5
+      - uses: mozilla-actions/sccache-action@v0.0.9
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -216,7 +216,7 @@ jobs:
           CRATE_BIN_PREFIX="${{ matrix.package.name }}"
           CRATE_BIN_PREFIX="${CRATE_BIN_PREFIX//-/_}"
           FOUND=0
-          for f in target/release/deps/${CRATE_BIN_PREFIX}-*; do
+          for f in "target/release/deps/${CRATE_BIN_PREFIX}-"*; do
             if [ -f "${f}" ] && file "${f}" | grep -q "ELF"; then
               FOUND=1
               if ldd "${f}" | grep -q "libortools"; then
@@ -237,7 +237,7 @@ jobs:
           CRATE_BIN_PREFIX="${{ matrix.package.name }}"
           CRATE_BIN_PREFIX="${CRATE_BIN_PREFIX//-/_}"
           FOUND=0
-          for f in target/release/deps/${CRATE_BIN_PREFIX}-*; do
+          for f in "target/release/deps/${CRATE_BIN_PREFIX}-"*; do
             if [ -f "${f}" ] && file "${f}" | grep -q "Mach-O"; then
               FOUND=1
               if otool -L "${f}" | grep -q "libortools"; then
