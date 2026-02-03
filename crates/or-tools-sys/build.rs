@@ -3,6 +3,14 @@ use std::path::{Path, PathBuf};
 const ORTOOLS_VERSION: &str = "9.15";
 const ORTOOLS_PREBUILT_BUILD: &str = "6755";
 
+fn ortools_sys_cache_dir() -> Option<PathBuf> {
+    std::env::var("OR_TOOLS_SYS_CACHE_DIR")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/cp_sat_wrapper.cpp");
     println!("cargo:rerun-if-env-changed=ORTOOLS_PREFIX");
@@ -11,6 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-env-changed=OR_TOOLS_SYS_PREBUILT_VERSION");
     println!("cargo:rerun-if-env-changed=OR_TOOLS_SYS_PREBUILT_BUILD");
     println!("cargo:rerun-if-env-changed=OR_TOOLS_SYS_BACKEND");
+    println!("cargo:rerun-if-env-changed=OR_TOOLS_SYS_CACHE_DIR");
 
     let target_os = std::env::var("CARGO_CFG_TARGET_OS")?;
 
@@ -313,7 +322,14 @@ fn download_ortools_prebuilt() -> Result<String, Box<dyn std::error::Error>> {
     let url =
         format!("https://github.com/google/or-tools/releases/download/v{ortools_version}/{asset}");
 
-    let download_dir = out_dir.join("or_tools_vendor_prebuilt");
+    let download_dir = if let Some(cache_dir) = ortools_sys_cache_dir() {
+        cache_dir
+            .join("or_tools_vendor_prebuilt")
+            .join(&target)
+            .join(format!("v{ortools_version}.{ortools_build}"))
+    } else {
+        out_dir.join("or_tools_vendor_prebuilt")
+    };
     let tarball = download_dir.join(&asset);
     let extract_dir = download_dir.join("_extract");
     let prefix_marker = download_dir.join("PREFIX_DIR");
@@ -415,7 +431,9 @@ fn find_first_dir(dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
 
 fn prepare_ortools_source_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
     if let Ok(p) = std::env::var("OR_TOOLS_SYS_SOURCE_DIR") { Ok(normalize_windows_path(PathBuf::from(p).canonicalize()?)) } else {
-        let source_dir = if cfg!(windows) {
+        let source_dir = if let Some(cache_dir) = ortools_sys_cache_dir() {
+            cache_dir.join("or_tools_source_dir")
+        } else if cfg!(windows) {
             if let Ok(tmp) = std::env::var("RUNNER_TEMP") {
                 PathBuf::from(tmp).join("or_tools_source_dir")
             } else {
@@ -469,7 +487,9 @@ fn ensure_ortools_source_present(source_dir: &Path) -> Result<(), Box<dyn std::e
         std::fs::remove_dir_all(source_dir)?;
     }
 
-    let vendor_dir = if cfg!(windows) {
+    let vendor_dir = if let Some(cache_dir) = ortools_sys_cache_dir() {
+        cache_dir.join("or-tools-sys")
+    } else if cfg!(windows) {
         if let Ok(tmp) = std::env::var("RUNNER_TEMP") {
             PathBuf::from(tmp).join("or-tools-sys")
         } else {

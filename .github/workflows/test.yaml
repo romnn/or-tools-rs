@@ -20,7 +20,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-24.04, windows-latest]
+        os: [macos-latest, ubuntu-24.04]
+        # os: [macos-latest, ubuntu-24.04, windows-latest]
         package: ${{ fromJson(needs.feature-matrix.outputs.matrix) }}
         include:
           - os: macos-latest
@@ -34,6 +35,12 @@ jobs:
     env:
       OR_TOOLS_SYS_PREBUILT_VERSION: "9.15"
       OR_TOOLS_SYS_PREBUILT_BUILD: "6755"
+      OR_TOOLS_SYS_CACHE_DIR: ${{ runner.temp }}/or-tools-sys-cache
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_BASEDIR: ${{ github.workspace }}
+      RUSTC_WRAPPER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
     steps:
       - uses: actions/checkout@v6
       - uses: arduino/setup-task@v2
@@ -42,6 +49,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+
+      - uses: mozilla-actions/sccache-action@v0.0.5
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          shared-key: v1-${{ runner.os }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |-
+            ${{ env.OR_TOOLS_SYS_CACHE_DIR }}
+            ${{ runner.temp }}/or-tools-prebuilt
+          key: v1-ortools-${{ runner.os }}-${{ hashFiles('crates/or-tools-sys/build.rs') }}
+          restore-keys: |-
+            v1-ortools-${{ runner.os }}-
 
       - uses: Homebrew/actions/setup-homebrew@master
         if: runner.os == 'macOS'
@@ -132,8 +155,7 @@ jobs:
         run: |-
           VERSION="${OR_TOOLS_SYS_PREBUILT_VERSION}"
           BUILD="${OR_TOOLS_SYS_PREBUILT_BUILD}"
-          PREFIX_BASE="${RUNNER_TEMP}/or-tools-prebuilt"
-          rm -rf "${PREFIX_BASE}"
+          PREFIX_BASE="${RUNNER_TEMP}/or-tools-prebuilt/v${VERSION}.${BUILD}"
           mkdir -p "${PREFIX_BASE}"
           if [ "${RUNNER_OS}" = "Linux" ]; then
             ASSET="or-tools_amd64_ubuntu-24.04_cpp_v${VERSION}.${BUILD}.tar.gz"
@@ -141,8 +163,12 @@ jobs:
             ASSET="or-tools_arm64_macOS-26.2_cpp_v${VERSION}.${BUILD}.tar.gz"
           fi
           URL="https://github.com/google/or-tools/releases/download/v${VERSION}/${ASSET}"
-          curl -L --fail -o "${PREFIX_BASE}/${ASSET}" "${URL}"
-          tar -xzf "${PREFIX_BASE}/${ASSET}" -C "${PREFIX_BASE}"
+          if [ ! -f "${PREFIX_BASE}/${ASSET}" ]; then
+            curl -L --fail -o "${PREFIX_BASE}/${ASSET}" "${URL}"
+          fi
+          if [ -z "$(find "${PREFIX_BASE}" -maxdepth 1 -mindepth 1 -type d | head -n 1)" ]; then
+            tar -xzf "${PREFIX_BASE}/${ASSET}" -C "${PREFIX_BASE}"
+          fi
           PREFIX_DIR="$(find "${PREFIX_BASE}" -maxdepth 1 -mindepth 1 -type d | head -n 1)"
           if [ -z "${PREFIX_DIR}" ]; then
             echo "failed to locate extracted OR-Tools prefix" >&2

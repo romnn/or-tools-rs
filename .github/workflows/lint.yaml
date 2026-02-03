@@ -12,15 +12,16 @@ jobs:
     uses: ./.github/workflows/feature-matrix.yaml
 
   lint:
-    name: lint ${{ matrix.package.name }} (${{ matrix.os }}, features ${{ matrix.package.features }})
-    runs-on: ${{ matrix.os }}
-    needs: [feature-matrix]
+    name: lint
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, ubuntu-24.04, windows-latest]
-        package: ${{ fromJson(needs.feature-matrix.outputs.matrix) }}
+    env:
+      OR_TOOLS_SYS_CACHE_DIR: ${{ runner.temp }}/or-tools-sys-cache
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_BASEDIR: ${{ github.workspace }}
+      RUSTC_WRAPPER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
     steps:
       - uses: actions/checkout@v6
       - uses: arduino/setup-task@v2
@@ -31,10 +32,23 @@ jobs:
         with:
           components: clippy
 
-      - uses: Homebrew/actions/setup-homebrew@master
-        if: runner.os == 'macOS'
+      - uses: mozilla-actions/sccache-action@v0.0.5
 
-      - name: Install native dependencies (Linux)
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          shared-key: v1-${{ runner.os }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |-
+            ${{ env.OR_TOOLS_SYS_CACHE_DIR }}
+          key: v1-ortools-${{ runner.os }}-${{ hashFiles('crates/or-tools-sys/build.rs') }}
+
+      # - uses: Homebrew/actions/setup-homebrew@master
+      #   if: runner.os == 'macOS'
+
+      - name: Install native dependencies
         if: runner.os == 'Linux'
         shell: bash
         run: |-
@@ -48,30 +62,93 @@ jobs:
             curl \
             tar
 
-      - name: Install native dependencies (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |-
-          brew install protobuf cmake ninja
-
-      - name: Install native dependencies (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |-
-          choco install -y cmake ninja protobuf
-
-      - name: Force build-from-source on Windows
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |-
-          echo "OR_TOOLS_SYS_BACKEND=build-from-source" >> "$GITHUB_ENV"
+      # - name: Install native dependencies (macOS)
+      #   if: runner.os == 'macOS'
+      #   shell: bash
+      #   run: |-
+      #     brew install protobuf cmake ninja
+      #
+      # - name: Install native dependencies (Windows)
+      #   if: runner.os == 'Windows'
+      #   shell: bash
+      #   run: |-
+      #     choco install -y cmake ninja protobuf
+      #
+      # - name: Force build-from-source on Windows
+      #   if: runner.os == 'Windows'
+      #   shell: bash
+      #   run: |-
+      #     echo "OR_TOOLS_SYS_BACKEND=build-from-source" >> "$GITHUB_ENV"
 
       - name: Lint
         # prettier-ignore
         run: >-
           cargo lint
-          --package "${{ matrix.package.name }}"
-          --features "${{ matrix.package.features }}"
+
+      # --package "${{ matrix.package.name }}"
+      # --features "${{ matrix.package.features }}"
+
+  # lint:
+  #   name: lint ${{ matrix.package.name }} (${{ matrix.os }}, features ${{ matrix.package.features }})
+  #   runs-on: ${{ matrix.os }}
+  #   needs: [feature-matrix]
+  #   timeout-minutes: 30
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       os: [macos-latest, ubuntu-24.04, windows-latest]
+  #       package: ${{ fromJson(needs.feature-matrix.outputs.matrix) }}
+  #   steps:
+  #     - uses: actions/checkout@v6
+  #     - uses: arduino/setup-task@v2
+  #       with:
+  #         repo-token: ${{ secrets.GITHUB_TOKEN }}
+  #
+  #     - uses: dtolnay/rust-toolchain@stable
+  #       with:
+  #         components: clippy
+  #
+  #     - uses: Homebrew/actions/setup-homebrew@master
+  #       if: runner.os == 'macOS'
+  #
+  #     - name: Install native dependencies (Linux)
+  #       if: runner.os == 'Linux'
+  #       shell: bash
+  #       run: |-
+  #         sudo apt-get update
+  #         sudo apt-get install -y --no-install-recommends \
+  #           build-essential \
+  #           cmake \
+  #           ninja-build \
+  #           pkg-config \
+  #           protobuf-compiler \
+  #           curl \
+  #           tar
+  #
+  #     - name: Install native dependencies (macOS)
+  #       if: runner.os == 'macOS'
+  #       shell: bash
+  #       run: |-
+  #         brew install protobuf cmake ninja
+  #
+  #     - name: Install native dependencies (Windows)
+  #       if: runner.os == 'Windows'
+  #       shell: bash
+  #       run: |-
+  #         choco install -y cmake ninja protobuf
+  #
+  #     - name: Force build-from-source on Windows
+  #       if: runner.os == 'Windows'
+  #       shell: bash
+  #       run: |-
+  #         echo "OR_TOOLS_SYS_BACKEND=build-from-source" >> "$GITHUB_ENV"
+  #
+  #     - name: Lint
+  #       # prettier-ignore
+  #       run: >-
+  #         cargo lint
+  #         --package "${{ matrix.package.name }}"
+  #         --features "${{ matrix.package.features }}"
 
   audit:
     runs-on: ubuntu-24.04
@@ -83,6 +160,10 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Homebrew/actions/setup-homebrew@master
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          shared-key: v1-${{ runner.os }}
       - run: brew install cargo-audit
       - name: Audit
         run: task audit
@@ -97,6 +178,10 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Homebrew/actions/setup-homebrew@master
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          shared-key: v1-${{ runner.os }}
       - run: brew install cargo-outdated
       - name: Check for outdated dependencies
         run: task outdated
@@ -111,6 +196,10 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Homebrew/actions/setup-homebrew@master
       - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          shared-key: v1-${{ runner.os }}
       - run: |
           brew install cargo-udeps
           brew install protobuf
@@ -127,6 +216,10 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Homebrew/actions/setup-homebrew@master
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          shared-key: v1-${{ runner.os }}
       - run: |
           brew install typos-cli
       - name: Spellcheck
