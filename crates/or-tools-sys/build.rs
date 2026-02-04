@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 const ORTOOLS_VERSION: &str = "9.15";
 const ORTOOLS_PREBUILT_BUILD: &str = "6755";
@@ -35,9 +36,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .flags(["-std=c++17", "-DOR_PROTO_DLL="])
         .file("src/cp_sat_wrapper.cpp")
         .include(&include_dir);
-    let utf8_range_include = include_dir.join("utf8_range");
-    if utf8_range_include.is_dir() {
-        cc_build.include(&utf8_range_include);
+    for utf8_range_include in [
+        include_dir.join("utf8_range"),
+        include_dir.join("google/protobuf/utf8_range"),
+    ] {
+        if utf8_range_include.is_dir() {
+            cc_build.include(&utf8_range_include);
+        }
     }
     cc_build.compile("or_tools_cp_sat_wrapper");
 
@@ -720,22 +725,6 @@ fn ensure_ortools_source_present(source_dir: &Path) -> Result<(), Box<dyn std::e
     let expected_header = source_dir.join("ortools/sat/cp_model.h");
     let expected_version = ORTOOLS_VERSION;
 
-    if source_dir.is_dir() {
-        let marker_version = std::fs::read_to_string(&marker)
-            .ok()
-            .map(|s| s.trim().to_string());
-
-        let version_matches = marker_version
-            .as_deref()
-            .is_some_and(|v| v == expected_version);
-
-        if expected_header.is_file() && version_matches {
-            return Ok(());
-        }
-
-        std::fs::remove_dir_all(source_dir)?;
-    }
-
     let vendor_dir = if let Some(cache_dir) = ortools_sys_cache_dir() {
         cache_dir.join("or-tools-sys")
     } else if cfg!(windows) {
@@ -755,6 +744,27 @@ fn ensure_ortools_source_present(source_dir: &Path) -> Result<(), Box<dyn std::e
     };
     std::fs::create_dir_all(&vendor_dir)?;
 
+    let _lock = FileLock::acquire(
+        &vendor_dir.join("or-tools-src.lock"),
+        Duration::from_secs(180),
+    )?;
+
+    if source_dir.is_dir() {
+        let marker_version = std::fs::read_to_string(&marker)
+            .ok()
+            .map(|s| s.trim().to_string());
+
+        let version_matches = marker_version
+            .as_deref()
+            .is_some_and(|v| v == expected_version);
+
+        if expected_header.is_file() && version_matches {
+            return Ok(());
+        }
+
+        std::fs::remove_dir_all(source_dir)?;
+    }
+
     let url =
         format!("https://github.com/google/or-tools/archive/refs/tags/v{expected_version}.tar.gz");
     let asset = format!("or-tools-src-v{expected_version}.tar.gz");
@@ -765,17 +775,34 @@ fn ensure_ortools_source_present(source_dir: &Path) -> Result<(), Box<dyn std::e
 
     std::fs::create_dir_all(&download_dir)?;
 
-    if !tarball.is_file() {
-        download(&url, &tarball)?;
+    let mut extracted_root = None;
+    for attempt in 1..=3 {
+        if !tarball.is_file() {
+            download(&url, &tarball)?;
+        }
+
+        if extract_dir.exists() {
+            std::fs::remove_dir_all(&extract_dir)?;
+        }
+        std::fs::create_dir_all(&extract_dir)?;
+
+        match extract_tgz(&tarball, &extract_dir).and_then(|()| find_first_dir(&extract_dir)) {
+            Ok(root) => {
+                extracted_root = Some(root);
+                break;
+            }
+            Err(e) if attempt < 3 => {
+                let _ = std::fs::remove_file(&tarball);
+                let _ = std::fs::remove_dir_all(&extract_dir);
+                eprintln!(
+                    "or-tools-sys: failed to extract OR-Tools source tarball (attempt {attempt}/3): {e}"
+                );
+            }
+            Err(e) => return Err(e),
+        }
     }
 
-    if extract_dir.exists() {
-        std::fs::remove_dir_all(&extract_dir)?;
-    }
-    std::fs::create_dir_all(&extract_dir)?;
-    extract_tgz(&tarball, &extract_dir)?;
-
-    let extracted_root = find_first_dir(&extract_dir)?;
+    let extracted_root = extracted_root.ok_or("failed to locate extracted OR-Tools directory")?;
 
     if source_dir.exists() {
         std::fs::remove_dir_all(source_dir)?;
@@ -801,4 +828,46 @@ fn glob_exists(dir: &Path, prefix: &str) -> Result<bool, Box<dyn std::error::Err
         }
     }
     Ok(false)
+}
+
+struct FileLock {
+    path: PathBuf,
+}
+
+impl FileLock {
+    fn acquire(path: &Path, timeout: Duration) -> Result<Self, Box<dyn std::error::Error>> {
+        let start = Instant::now();
+        loop {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+            {
+                Ok(mut file) => {
+                    let _ = std::io::Write::write_all(
+                        &mut file,
+                        format!("pid={}\n", std::process::id()).as_bytes(),
+                    );
+                    return Ok(Self {
+                        path: path.to_path_buf(),
+                    });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if start.elapsed() > timeout {
+                        return Err(
+                            format!("timed out waiting for lock file {}", path.display()).into(),
+                        );
+                    }
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
