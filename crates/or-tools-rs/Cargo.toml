@@ -59,3 +59,4 @@ smallvec = { version = "1", default-features = false, features = ["union"]}
 [build-dependencies]
 prost-build = { version = "0.14" }
 or-tools-sys = { path = "../or-tools-sys" }
+ureq = "3"

@@ -58,7 +58,7 @@ pub mod builder;
     warnings,
     missing_docs,
     clippy::all,
-    clippy::pendantic,
+    clippy::pedantic,
     rustdoc::broken_intra_doc_links,
     rustdoc::bare_urls,
     clippy::doc_markdown,

@@ -36,7 +36,7 @@ impl CpModelBuilder {
     }
 
     /// Creates a new boolean variable, and returns the [`BoolVar`]
-    /// indentifier.
+    /// identifier.
     ///
     /// A boolean variable can be converted to an [`IntVar`] with the
     /// `std::convert::From` trait. In this case it acts as a variable
@@ -63,7 +63,7 @@ impl CpModelBuilder {
     }
 
     /// Creates a new boolean variable with a name, and returns the
-    /// [`BoolVar`] indentifier.
+    /// [`BoolVar`] identifier.
     ///
     /// # Example
     ///
@@ -84,7 +84,7 @@ impl CpModelBuilder {
         BoolVar(index)
     }
     /// Creates a new integer variable, and returns the [`IntVar`]
-    /// indentifier.
+    /// identifier.
     ///
     /// The domain of the variable is given. Bounds are included, so
     /// `[(0, 2), (4, 8)]` means [0, 2]∪[4, 8].
@@ -106,7 +106,7 @@ impl CpModelBuilder {
     }
 
     /// Creates a new integer variable with a name, and returns the
-    /// [`IntVar`] indentifier.
+    /// [`IntVar`] identifier.
     ///
     /// # Example
     ///
@@ -131,7 +131,7 @@ impl CpModelBuilder {
         IntVar(index)
     }
 
-    /// Returns the name of a variable, empty string if not setted.
+    /// Returns the name of a variable, empty string if not set.
     ///
     /// # Example
     ///
@@ -170,7 +170,7 @@ impl CpModelBuilder {
         }
     }
 
-    /// Returns the name of a constraint, empty string if not setted.
+    /// Returns the name of a constraint, empty string if not set.
     ///
     /// # Example
     ///
@@ -609,7 +609,7 @@ impl CpModelBuilder {
         self.add_linear_constraint(lhs.into() - rhs.into(), [(i64::MIN, 0)])
     }
 
-    /// Adds a stricly greater constraint between 2 linear expressions.
+    /// Adds a strictly greater constraint between 2 linear expressions.
     ///
     /// # Example
     ///

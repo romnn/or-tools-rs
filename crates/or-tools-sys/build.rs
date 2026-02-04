@@ -4,6 +4,8 @@ use std::time::{Duration, Instant};
 const ORTOOLS_VERSION: &str = "9.15";
 const ORTOOLS_PREBUILT_BUILD: &str = "6755";
 
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
 fn ortools_sys_cache_dir() -> Option<PathBuf> {
     std::env::var("OR_TOOLS_SYS_CACHE_DIR")
         .ok()
@@ -12,7 +14,7 @@ fn ortools_sys_cache_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=src/cp_sat_wrapper.cpp");
     println!("cargo:rerun-if-env-changed=ORTOOLS_PREFIX");
     println!("cargo:rerun-if-env-changed=ORTOOL_PREFIX");
@@ -26,7 +28,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let target_os = std::env::var("CARGO_CFG_TARGET_OS")?;
 
-    let (include_dir, lib_dir, emit_rpath, link_static) = resolve_ortools()?;
+    let ResolvedOrtools {
+        include_dir,
+        lib_dir,
+        emit_rpath,
+        link_static,
+        ortools_version,
+    } = resolve_ortools()?;
 
     let mut cc_build = cc::Build::new();
     cc_build
@@ -109,11 +117,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("cargo:metadata=ortools_lib_dir={}", lib_dir.display());
     println!("cargo:metadata=ortools_link_static={link_static}");
+    println!("cargo:metadata=ortools_version={ortools_version}");
 
     Ok(())
 }
 
-fn emit_static_dep_links(lib_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn emit_static_dep_links(lib_dir: &Path) -> Result<()> {
     // Protobuf built by OR-Tools depends on Abseil (and other helper archives). When we
     // link protobuf statically, we must also link these dependent archives.
     //
@@ -215,7 +224,15 @@ enum Backend {
     BuildFromSource,
 }
 
-fn resolve_ortools() -> Result<(PathBuf, PathBuf, bool, bool), Box<dyn std::error::Error>> {
+struct ResolvedOrtools {
+    include_dir: PathBuf,
+    lib_dir: PathBuf,
+    emit_rpath: bool,
+    link_static: bool,
+    ortools_version: String,
+}
+
+fn resolve_ortools() -> Result<ResolvedOrtools> {
     let feature_build_from_source = std::env::var("CARGO_FEATURE_BUILD_FROM_SOURCE").is_ok();
     let feature_vendor_prebuilt = std::env::var("CARGO_FEATURE_VENDOR_PREBUILT").is_ok();
     let feature_system = std::env::var("CARGO_FEATURE_SYSTEM").is_ok();
@@ -266,17 +283,29 @@ fn resolve_ortools() -> Result<(PathBuf, PathBuf, bool, bool), Box<dyn std::erro
 
     let link_static = feature_static && backend == Backend::BuildFromSource;
 
-    let prefix = match backend {
-        Backend::BuildFromSource => build_ortools_from_source(link_static)?,
+    let (prefix, ortools_version) = match backend {
+        Backend::BuildFromSource => (
+            build_ortools_from_source(link_static)?,
+            ORTOOLS_VERSION.to_string(),
+        ),
         Backend::VendorPrebuilt => download_ortools_prebuilt()?,
-        Backend::System => system_prefix_from_env().unwrap_or_else(|| "/opt/ortools".into()),
+        Backend::System => (
+            system_prefix_from_env().unwrap_or_else(|| "/opt/ortools".into()),
+            ORTOOLS_VERSION.to_string(),
+        ),
     };
 
     let include_dir = PathBuf::from(&prefix).join("include");
     let lib_dir = ortools_lib_dir(&prefix);
 
     let emit_rpath = backend != Backend::System;
-    Ok((include_dir, lib_dir, emit_rpath, link_static))
+    Ok(ResolvedOrtools {
+        include_dir,
+        lib_dir,
+        emit_rpath,
+        link_static,
+        ortools_version,
+    })
 }
 
 fn ortools_lib_dir(prefix: &str) -> PathBuf {
@@ -288,7 +317,7 @@ fn ortools_lib_dir(prefix: &str) -> PathBuf {
     }
 }
 
-fn workspace_root() -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn workspace_root() -> Result<PathBuf> {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
     Ok(manifest_dir
         .parent()
@@ -297,7 +326,7 @@ fn workspace_root() -> Result<PathBuf, Box<dyn std::error::Error>> {
         .to_path_buf())
 }
 
-fn build_ortools_from_source(link_static: bool) -> Result<String, Box<dyn std::error::Error>> {
+fn build_ortools_from_source(link_static: bool) -> Result<String> {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR")?);
 
     let source_dir = prepare_ortools_source_dir()?;
@@ -382,10 +411,7 @@ fn build_ortools_from_source(link_static: bool) -> Result<String, Box<dyn std::e
     Ok(install_dir.to_string_lossy().to_string())
 }
 
-fn prepare_patchable_source_dir_for_static(
-    source_dir: &Path,
-    out_dir: &Path,
-) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn prepare_patchable_source_dir_for_static(source_dir: &Path, out_dir: &Path) -> Result<PathBuf> {
     let workspace_root = workspace_root()?;
     let vendored_source_dir = workspace_root.join("vendor/or-tools").canonicalize().ok();
     let source_dir = source_dir.canonicalize()?;
@@ -421,7 +447,7 @@ fn prepare_patchable_source_dir_for_static(
     Ok(scratch_dir)
 }
 
-fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
     std::fs::create_dir_all(dst)?;
 
     for entry in std::fs::read_dir(src)? {
@@ -444,9 +470,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
-fn patch_downloaded_ortools_deps_for_static(
-    source_dir: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn patch_downloaded_ortools_deps_for_static(source_dir: &Path) -> Result<()> {
     let workspace_root = workspace_root()?;
     let vendored_source_dir = workspace_root.join("vendor/or-tools").canonicalize().ok();
     let source_dir = source_dir.canonicalize()?;
@@ -526,7 +550,7 @@ fn patch_downloaded_ortools_deps_for_static(
     Ok(())
 }
 
-fn download_ortools_prebuilt() -> Result<String, Box<dyn std::error::Error>> {
+fn download_ortools_prebuilt() -> Result<(String, String)> {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR")?);
 
     let ortools_version = std::env::var("OR_TOOLS_SYS_PREBUILT_VERSION")
@@ -576,7 +600,7 @@ fn download_ortools_prebuilt() -> Result<String, Box<dyn std::error::Error>> {
     if let Ok(prefix) = std::fs::read_to_string(&prefix_marker) {
         let prefix = prefix.trim();
         if !prefix.is_empty() && Path::new(prefix).is_dir() {
-            return Ok(prefix.to_string());
+            return Ok((prefix.to_string(), ortools_version));
         }
     }
 
@@ -616,10 +640,10 @@ fn download_ortools_prebuilt() -> Result<String, Box<dyn std::error::Error>> {
 
     let prefix_str = prefix.to_string_lossy().to_string();
     std::fs::write(prefix_marker, &prefix_str)?;
-    Ok(prefix_str)
+    Ok((prefix_str, ortools_version))
 }
 
-fn download(url: &str, out: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn download(url: &str, out: &Path) -> Result<()> {
     let tmp = out.with_extension("tmp");
     if tmp.exists() {
         let _ = std::fs::remove_file(&tmp);
@@ -657,7 +681,7 @@ fn download(url: &str, out: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn extract_tgz(tarball: &Path, extract_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn extract_tgz(tarball: &Path, extract_dir: &Path) -> Result<()> {
     let status = std::process::Command::new("tar")
         .args(["-xzf"])
         .arg(tarball)
@@ -671,7 +695,7 @@ fn extract_tgz(tarball: &Path, extract_dir: &Path) -> Result<(), Box<dyn std::er
     Ok(())
 }
 
-fn find_first_dir(dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn find_first_dir(dir: &Path) -> Result<PathBuf> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -682,7 +706,7 @@ fn find_first_dir(dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
     Err("failed to locate extracted OR-Tools directory".into())
 }
 
-fn prepare_ortools_source_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn prepare_ortools_source_dir() -> Result<PathBuf> {
     if let Ok(p) = std::env::var("OR_TOOLS_SYS_SOURCE_DIR") {
         Ok(normalize_windows_path(PathBuf::from(p).canonicalize()?))
     } else if cfg!(windows) {
@@ -734,7 +758,7 @@ fn normalize_windows_path(path: PathBuf) -> PathBuf {
     path
 }
 
-fn ensure_ortools_source_present(source_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn ensure_ortools_source_present(source_dir: &Path) -> Result<()> {
     let marker = source_dir.join(".or-tools-sys-version");
 
     let expected_header = source_dir.join("ortools/sat/cp_model.h");
@@ -844,7 +868,7 @@ fn ensure_ortools_source_present(source_dir: &Path) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
-fn glob_exists(dir: &Path, prefix: &str) -> Result<bool, Box<dyn std::error::Error>> {
+fn glob_exists(dir: &Path, prefix: &str) -> Result<bool> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let name = entry.file_name();
@@ -861,7 +885,7 @@ struct FileLock {
 }
 
 impl FileLock {
-    fn acquire(path: &Path, timeout: Duration) -> Result<Self, Box<dyn std::error::Error>> {
+    fn acquire(path: &Path, timeout: Duration) -> Result<Self> {
         let start = Instant::now();
         loop {
             match std::fs::OpenOptions::new()
