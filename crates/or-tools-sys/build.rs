@@ -44,6 +44,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             cc_build.include(&utf8_range_include);
         }
     }
+    for utf8_validity_header in [
+        include_dir.join("utf8_validity.h"),
+        include_dir.join("utf8_range/utf8_validity.h"),
+        include_dir.join("google/protobuf/utf8_validity.h"),
+        include_dir.join("google/protobuf/utf8_range/utf8_validity.h"),
+    ] {
+        if utf8_validity_header.is_file()
+            && let Some(parent) = utf8_validity_header.parent()
+        {
+            cc_build.include(parent);
+        }
+    }
     cc_build.compile("or_tools_cp_sat_wrapper");
 
     if target_os == "macos" {
@@ -556,7 +568,7 @@ fn download_ortools_prebuilt() -> Result<String, Box<dyn std::error::Error>> {
         out_dir.join("or_tools_vendor_prebuilt")
     };
     let tarball = download_dir.join(&asset);
-    let extract_dir = download_dir.join("_extract");
+    let extract_dir_base = download_dir.join("_extract");
     let prefix_marker = download_dir.join("PREFIX_DIR");
 
     std::fs::create_dir_all(&download_dir)?;
@@ -571,6 +583,8 @@ fn download_ortools_prebuilt() -> Result<String, Box<dyn std::error::Error>> {
     if !tarball.is_file() {
         download(&url, &tarball)?;
     }
+
+    let extract_dir = extract_dir_base.join(std::process::id().to_string());
 
     if extract_dir.exists() {
         std::fs::remove_dir_all(&extract_dir)?;
@@ -625,21 +639,21 @@ fn download(url: &str, out: &Path) -> Result<(), Box<dyn std::error::Error>> {
         ])
         .arg(&tmp)
         .arg(url)
-        .status();
+        .status()
+        .map_err(|e| format!("failed to run curl: {e}"))?;
 
-    match status {
-        Ok(s) if s.success() => {}
-        Ok(_) => {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(format!("failed to download {url}").into());
-        }
-        Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(e.into());
-        }
+    if !status.success() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("failed to download {url}").into());
     }
 
-    std::fs::rename(tmp, out)?;
+    std::fs::rename(&tmp, out).map_err(|e| {
+        format!(
+            "failed to move downloaded tarball {} -> {}: {e}",
+            tmp.display(),
+            out.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -649,7 +663,8 @@ fn extract_tgz(tarball: &Path, extract_dir: &Path) -> Result<(), Box<dyn std::er
         .arg(tarball)
         .args(["-C"])
         .arg(extract_dir)
-        .status()?;
+        .status()
+        .map_err(|e| format!("failed to run tar: {e}"))?;
     if !status.success() {
         return Err("failed to extract OR-Tools tarball".into());
     }
@@ -749,6 +764,10 @@ fn ensure_ortools_source_present(source_dir: &Path) -> Result<(), Box<dyn std::e
         Duration::from_secs(180),
     )?;
 
+    if let Some(parent) = source_dir.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
     if source_dir.is_dir() {
         let marker_version = std::fs::read_to_string(&marker)
             .ok()
@@ -771,12 +790,13 @@ fn ensure_ortools_source_present(source_dir: &Path) -> Result<(), Box<dyn std::e
 
     let download_dir = vendor_dir.join("or_tools_source");
     let tarball = download_dir.join(&asset);
-    let extract_dir = download_dir.join("_extract");
+    let extract_dir_base = download_dir.join("_extract");
 
     std::fs::create_dir_all(&download_dir)?;
 
     let mut extracted_root = None;
     for attempt in 1..=3 {
+        let extract_dir = extract_dir_base.join(format!("{}-{attempt}", std::process::id()));
         if !tarball.is_file() {
             download(&url, &tarball)?;
         }
@@ -808,7 +828,13 @@ fn ensure_ortools_source_present(source_dir: &Path) -> Result<(), Box<dyn std::e
         std::fs::remove_dir_all(source_dir)?;
     }
 
-    std::fs::rename(&extracted_root, source_dir)?;
+    std::fs::rename(&extracted_root, source_dir).map_err(|e| {
+        format!(
+            "failed to move extracted OR-Tools directory {} -> {}: {e}",
+            extracted_root.display(),
+            source_dir.display()
+        )
+    })?;
 
     if !expected_header.is_file() {
         return Err("downloaded OR-Tools source missing ortools/sat/cp_model.h".into());
