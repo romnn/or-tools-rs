@@ -27,14 +27,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (include_dir, lib_dir, emit_rpath, link_static) = resolve_ortools()?;
 
-    cc::Build::new()
+    let mut cc_build = cc::Build::new();
+    cc_build
         .cpp(true)
         .warnings(false)
         .extra_warnings(false)
         .flags(["-std=c++17", "-DOR_PROTO_DLL="])
         .file("src/cp_sat_wrapper.cpp")
-        .include(&include_dir)
-        .compile("or_tools_cp_sat_wrapper");
+        .include(&include_dir);
+    let utf8_range_include = include_dir.join("utf8_range");
+    if utf8_range_include.is_dir() {
+        cc_build.include(&utf8_range_include);
+    }
+    cc_build.compile("or_tools_cp_sat_wrapper");
 
     if target_os == "macos" {
         println!("cargo:rustc-link-lib=dylib=c++");
@@ -199,6 +204,13 @@ fn resolve_ortools() -> Result<(PathBuf, PathBuf, bool, bool), Box<dyn std::erro
     let feature_system = std::env::var("CARGO_FEATURE_SYSTEM").is_ok();
     let feature_static = std::env::var("CARGO_FEATURE_STATIC").is_ok();
 
+    let system_prefix_from_env = || {
+        std::env::var("ORTOOLS_PREFIX")
+            .or_else(|_| std::env::var("ORTOOL_PREFIX"))
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+    };
+
     let backend = match std::env::var("OR_TOOLS_SYS_BACKEND").as_deref() {
         Ok("system") => Backend::System,
         Ok("vendor-prebuilt") => Backend::VendorPrebuilt,
@@ -210,11 +222,21 @@ fn resolve_ortools() -> Result<(PathBuf, PathBuf, bool, bool), Box<dyn std::erro
             .into());
         }
         Err(_) => {
-            // Multiple backends may be enabled (e.g. via dependency defaults +
-            // explicit feature selection). Prefer an explicitly-requested backend
-            // over defaults.
             if feature_system {
-                Backend::System
+                if system_prefix_from_env().is_some() {
+                    Backend::System
+                } else {
+                    let system_header = Path::new("/opt/ortools/include/ortools/sat/cp_model.h");
+                    if system_header.is_file() {
+                        Backend::System
+                    } else if feature_vendor_prebuilt {
+                        Backend::VendorPrebuilt
+                    } else if feature_build_from_source {
+                        Backend::BuildFromSource
+                    } else {
+                        Backend::System
+                    }
+                }
             } else if feature_build_from_source {
                 Backend::BuildFromSource
             } else if feature_vendor_prebuilt {
@@ -230,9 +252,7 @@ fn resolve_ortools() -> Result<(PathBuf, PathBuf, bool, bool), Box<dyn std::erro
     let prefix = match backend {
         Backend::BuildFromSource => build_ortools_from_source(link_static)?,
         Backend::VendorPrebuilt => download_ortools_prebuilt()?,
-        Backend::System => std::env::var("ORTOOLS_PREFIX")
-            .or_else(|_| std::env::var("ORTOOL_PREFIX"))
-            .unwrap_or_else(|_| "/opt/ortools".into()),
+        Backend::System => system_prefix_from_env().unwrap_or_else(|| "/opt/ortools".into()),
     };
 
     let include_dir = PathBuf::from(&prefix).join("include");
@@ -350,10 +370,13 @@ fn prepare_patchable_source_dir_for_static(
     out_dir: &Path,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let workspace_root = workspace_root()?;
-    let vendored_source_dir = workspace_root.join("vendor/or-tools").canonicalize()?;
+    let vendored_source_dir = workspace_root.join("vendor/or-tools").canonicalize().ok();
     let source_dir = source_dir.canonicalize()?;
 
-    if source_dir != vendored_source_dir {
+    if vendored_source_dir
+        .as_ref()
+        .is_none_or(|vendored| vendored != &source_dir)
+    {
         return Ok(source_dir);
     }
 
@@ -408,10 +431,13 @@ fn patch_downloaded_ortools_deps_for_static(
     source_dir: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let workspace_root = workspace_root()?;
-    let vendored_source_dir = workspace_root.join("vendor/or-tools").canonicalize()?;
+    let vendored_source_dir = workspace_root.join("vendor/or-tools").canonicalize().ok();
     let source_dir = source_dir.canonicalize()?;
 
-    if source_dir == vendored_source_dir {
+    if vendored_source_dir
+        .as_ref()
+        .is_some_and(|vendored| vendored == &source_dir)
+    {
         return Ok(());
     }
 
@@ -648,18 +674,28 @@ fn prepare_ortools_source_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
         ensure_ortools_source_present(&source_dir)?;
         Ok(normalize_windows_path(source_dir.canonicalize()?))
     } else {
-        let source_dir = workspace_root()?.join("vendor/or-tools");
-
-        // On non-Windows we rely on the repository's vendored OR-Tools checkout.
-        // Do not try to delete/replace it at build time.
-        let expected_header = source_dir.join("ortools/sat/cp_model.h");
-        if !expected_header.is_file() {
-            return Err(
-                "vendored OR-Tools source missing ortools/sat/cp_model.h (did you forget to fetch submodules?)"
-                    .into(),
-            );
+        let workspace_source_dir = workspace_root()?.join("vendor/or-tools");
+        let expected_header = workspace_source_dir.join("ortools/sat/cp_model.h");
+        if expected_header.is_file() {
+            return Ok(workspace_source_dir.canonicalize()?);
         }
 
+        let source_dir = if let Some(cache_dir) = ortools_sys_cache_dir() {
+            cache_dir
+                .join("or-tools-sys")
+                .join("or_tools_source_dir")
+                .join(format!("v{ORTOOLS_VERSION}"))
+        } else if let Ok(tmp) = std::env::var("RUNNER_TEMP") {
+            PathBuf::from(tmp)
+                .join("or_tools_source_dir")
+                .join(format!("v{ORTOOLS_VERSION}"))
+        } else {
+            std::env::temp_dir()
+                .join("or_tools_source_dir")
+                .join(format!("v{ORTOOLS_VERSION}"))
+        };
+
+        ensure_ortools_source_present(&source_dir)?;
         Ok(source_dir.canonicalize()?)
     }
 }

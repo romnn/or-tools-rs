@@ -178,6 +178,9 @@ jobs:
           ln -s "${ORTOOLS_PREFIX_BREW}/include/ortools" "${PREFIX}/include/ortools"
           ln -s "${ABSEIL_PREFIX_BREW}/include/absl" "${PREFIX}/include/absl"
           ln -s "${PROTOBUF_PREFIX_BREW}/include/google" "${PREFIX}/include/google"
+          if [ -d "${PROTOBUF_PREFIX_BREW}/include/utf8_range" ]; then
+            ln -s "${PROTOBUF_PREFIX_BREW}/include/utf8_range" "${PREFIX}/include/utf8_range"
+          fi
           for lib in libortools.dylib libprotobuf.dylib libprotobuf-lite.dylib; do
             if [ -f "${ORTOOLS_PREFIX_BREW}/lib/${lib}" ]; then
               ln -s "${ORTOOLS_PREFIX_BREW}/lib/${lib}" "${PREFIX}/lib/${lib}"
