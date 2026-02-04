@@ -181,6 +181,11 @@ jobs:
           if [ -d "${PROTOBUF_PREFIX_BREW}/include/utf8_range" ]; then
             ln -s "${PROTOBUF_PREFIX_BREW}/include/utf8_range" "${PREFIX}/include/utf8_range"
           fi
+          UTF8_VALIDITY_H="$(find "${PROTOBUF_PREFIX_BREW}/include" -name utf8_validity.h -print -quit || true)"
+          if [ -n "${UTF8_VALIDITY_H}" ]; then
+            UTF8_VALIDITY_DIR="$(dirname "${UTF8_VALIDITY_H}")"
+            echo "CXXFLAGS=-I${UTF8_VALIDITY_DIR} ${CXXFLAGS}" >> "$GITHUB_ENV"
+          fi
           for lib in libortools.dylib libprotobuf.dylib libprotobuf-lite.dylib; do
             if [ -f "${ORTOOLS_PREFIX_BREW}/lib/${lib}" ]; then
               ln -s "${ORTOOLS_PREFIX_BREW}/lib/${lib}" "${PREFIX}/lib/${lib}"
